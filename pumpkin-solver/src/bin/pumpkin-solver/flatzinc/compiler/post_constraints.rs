@@ -425,7 +425,7 @@ fn compile_regular(
     context: &mut CompilationContext<'_>,
     exprs: &[flatzinc::Expr],
     _options: &FlatZincOptions,
-    _constraint_tag: ConstraintTag,
+    constraint_tag: ConstraintTag,
 ) -> Result<bool, FlatZincError> {
     check_parameters!(exprs, 6, "pumpkin_regular");
 
@@ -449,6 +449,7 @@ fn compile_regular(
             } => (lower_bound..=upper_bound).collect(),
             Set::Sparse { values } => values.to_vec(),
         },
+        constraint_tag,
     )
     .post(context.solver);
     Ok(post_result.is_ok())
@@ -458,7 +459,7 @@ fn compile_regular_nfa(
     context: &mut CompilationContext<'_>,
     exprs: &[flatzinc::Expr],
     _options: &FlatZincOptions,
-    _constraint_tag: ConstraintTag,
+    constraint_tag: ConstraintTag,
 ) -> Result<bool, FlatZincError> {
     check_parameters!(exprs, 6, "pumpkin_regular_nfa");
 
@@ -495,6 +496,7 @@ fn compile_regular_nfa(
             } => (lower_bound..=upper_bound).collect(),
             Set::Sparse { values } => values.to_vec(),
         },
+        constraint_tag,
     )
     .post(context.solver);
     Ok(post_result.is_ok())

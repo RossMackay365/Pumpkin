@@ -1,3 +1,6 @@
+use pumpkin_core::declare_inference_label;
+use pumpkin_core::proof::ConstraintTag;
+use pumpkin_core::proof::InferenceCode;
 use pumpkin_core::propagation::PropagationContext;
 use pumpkin_core::propagation::Propagator;
 use pumpkin_core::propagation::PropagatorConstructor;
@@ -13,7 +16,10 @@ pub struct RegularNfaPropagatorConstructor<Var> {
     pub transition_matrix: Vec<Vec<Vec<i32>>>,
     pub initial_state: i32,
     pub accepting_states: Vec<i32>,
+
+    pub constraint_tag: ConstraintTag,
 }
+declare_inference_label!(RegularNfa);
 
 impl<Var: IntegerVariable + 'static> PropagatorConstructor
     for RegularNfaPropagatorConstructor<Var>
@@ -33,6 +39,8 @@ pub struct RegularNfaPropagator<Var> {
     transition_matrix: Vec<Vec<Vec<i32>>>,
     initial_state: i32,
     accepting_states: Vec<i32>,
+
+    inference_code: InferenceCode,
 }
 
 impl<Var: IntegerVariable + 'static> Propagator for RegularNfaPropagator<Var> {

@@ -1,4 +1,5 @@
 use pumpkin_core::constraints::Constraint;
+use pumpkin_core::proof::ConstraintTag;
 use pumpkin_core::variables::IntegerVariable;
 use pumpkin_propagators::regular::RegularPropagatorConstructor;
 
@@ -9,6 +10,7 @@ pub fn regular<Var: IntegerVariable + 'static>(
     transition_matrix: Vec<Vec<i32>>,
     initial_state: i32,
     accepting_states: Vec<i32>,
+    constraint_tag: ConstraintTag,
 ) -> impl Constraint {
     RegularPropagatorConstructor {
         sequence: sequence.into(),
@@ -17,5 +19,6 @@ pub fn regular<Var: IntegerVariable + 'static>(
         transition_matrix,
         initial_state,
         accepting_states,
+        constraint_tag,
     }
 }
