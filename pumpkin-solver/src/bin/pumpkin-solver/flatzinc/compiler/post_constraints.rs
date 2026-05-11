@@ -347,6 +347,7 @@ pub(crate) fn run(
             ),
             "pumpkin_regular" => compile_regular(context, exprs, options, constraint_tag)?,
             "pumpkin_regular_nfa" => compile_regular_nfa(context, exprs, options, constraint_tag)?,
+            "regular_cdfa" => compile_regular_cdfa(context, exprs, options, constraint_tag)?,
             unknown => todo!("unsupported constraint {unknown}"),
         };
 
@@ -496,6 +497,36 @@ fn compile_regular_nfa(
             } => (lower_bound..=upper_bound).collect(),
             Set::Sparse { values } => values.to_vec(),
         },
+        constraint_tag,
+    )
+    .post(context.solver);
+    Ok(post_result.is_ok())
+}
+
+fn compile_regular_cdfa(
+    context: &mut CompilationContext<'_>,
+    exprs: &[flatzinc::Expr],
+    _options: &FlatZincOptions,
+    constraint_tag: ConstraintTag,
+) -> Result<bool, FlatZincError> {
+    check_parameters!(exprs, 7, "regular_cdfa");
+
+    let input = context.resolve_integer_variable_array(&exprs[0])?;
+    let num_states = context.resolve_integer_constant_from_expr(&exprs[1])?;
+    let num_inputs = context.resolve_integer_constant_from_expr(&exprs[2])?;
+    let transition = context.resolve_array_integer_constants(&exprs[3])?;
+    let start_state = context.resolve_integer_constant_from_expr(&exprs[4])?;
+    let inc = context.resolve_array_integer_constants(&exprs[5])?;
+    let count = context.resolve_integer_variable(&exprs[6])?;
+
+    let post_result = pumpkin_constraints::regular_cdfa(
+        input.to_vec(),
+        num_states.try_into().unwrap(),
+        num_inputs.try_into().unwrap(),
+        to_2d(&transition, num_states as usize, num_inputs as usize),
+        start_state,
+        to_2d(&inc, num_states as usize, num_inputs as usize),
+        count,
         constraint_tag,
     )
     .post(context.solver);

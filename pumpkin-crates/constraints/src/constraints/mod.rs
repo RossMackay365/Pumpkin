@@ -35,6 +35,7 @@ mod cumulative;
 mod disjunctive_strict;
 mod element;
 mod regular;
+mod regular_cdfa;
 mod regular_nfa;
 mod table;
 
@@ -46,5 +47,6 @@ pub use cumulative::*;
 pub use disjunctive_strict::*;
 pub use element::*;
 pub use regular::*;
+pub use regular_cdfa::*;
 pub use regular_nfa::*;
 pub use table::*;
