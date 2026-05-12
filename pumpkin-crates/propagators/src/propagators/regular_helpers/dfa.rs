@@ -6,6 +6,8 @@ use itertools::Itertools;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use super::layered_graph::Letter;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DFA<Item>
 where

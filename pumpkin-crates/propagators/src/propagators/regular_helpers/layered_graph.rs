@@ -12,6 +12,8 @@ use super::DrawNode;
 use super::DrawnGraph;
 use super::GraphDraw;
 
+use super::dfa::DFA;
+
 #[derive(Debug, Clone)]
 #[allow(dead_code, reason = "not implemented yet")]
 pub struct LayeredGraph {
@@ -26,7 +28,7 @@ pub struct LayeredGraph {
     state_count: usize,
 }
 
-type Letter = i32;
+pub(crate) type Letter = i32;
 
 type StartLayer = usize;
 type State = usize;
