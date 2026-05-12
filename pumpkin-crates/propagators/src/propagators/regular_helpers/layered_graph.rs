@@ -7,12 +7,7 @@ use std::hash::Hash;
 
 use itertools::Itertools;
 
-use super::DrawEdge;
-use super::DrawNode;
-use super::DrawnGraph;
-use super::GraphDraw;
-
-use super::dfa::DFA;
+use crate::propagators::regular_helpers::{DrawEdge, DrawNode, DrawnGraph, GraphDraw, DFA};
 
 #[derive(Debug, Clone)]
 #[allow(dead_code, reason = "not implemented yet")]

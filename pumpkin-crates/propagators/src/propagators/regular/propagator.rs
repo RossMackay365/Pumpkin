@@ -10,8 +10,7 @@ use pumpkin_core::propagation::DomainEvents;
 use pumpkin_core::state::PropagationStatusCP;
 use pumpkin_core::variables::IntegerVariable;
 
-use super::regular_helpers::layered_graph::LayeredGraph;
-use super::regular_helpers::dfa::DFA;
+use crate::propagators::regular_helpers::{DFA, LayeredGraph};
 
 #[derive(Clone, Debug)]
 pub struct RegularPropagatorConstructor<Var> {
