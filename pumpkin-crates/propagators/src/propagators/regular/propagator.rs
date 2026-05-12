@@ -5,6 +5,8 @@ use pumpkin_core::propagation::PropagationContext;
 use pumpkin_core::propagation::Propagator;
 use pumpkin_core::propagation::PropagatorConstructor;
 use pumpkin_core::propagation::PropagatorConstructorContext;
+use pumpkin_core::propagation::LocalId;
+use pumpkin_core::propagation::DomainEvents;
 use pumpkin_core::state::PropagationStatusCP;
 use pumpkin_core::variables::IntegerVariable;
 
@@ -17,6 +19,8 @@ pub struct RegularPropagatorConstructor<Var> {
     pub initial_state: i32,
     pub accepting_states: Vec<i32>,
 
+    // pub internal_graph: LayeredGraph,
+
     pub constraint_tag: ConstraintTag,
 }
 declare_inference_label!(RegularDfa);
@@ -24,8 +28,34 @@ declare_inference_label!(RegularDfa);
 impl<Var: IntegerVariable + 'static> PropagatorConstructor for RegularPropagatorConstructor<Var> {
     type PropagatorImpl = RegularPropagator<Var>;
 
-    fn create(self, context: PropagatorConstructorContext) -> Self::PropagatorImpl {
-        todo!()
+    fn create(self, mut context: PropagatorConstructorContext) -> Self::PropagatorImpl {
+      let RegularPropagatorConstructor {
+          sequence,
+          num_states,
+          num_inputs,
+          transition_matrix,
+          initial_state,
+          accepting_states,
+          constraint_tag,
+      } = self;
+      
+      // Register Variables with Solver
+      for (idx, var) in sequence.iter().enumerate() {
+          context.register(var.clone(), DomainEvents::BOUNDS, LocalId::from(idx as u32));
+      }
+
+      // Build Internal Graph
+
+      // Return Constructed Regular Propagator
+      RegularPropagator {
+          sequence,
+          num_states,
+          num_inputs,
+          transition_matrix,
+          initial_state,
+          accepting_states,
+          inference_code: InferenceCode::new(constraint_tag, RegularDfa),
+      }
     }
 }
 
