@@ -10,6 +10,9 @@ use pumpkin_core::propagation::DomainEvents;
 use pumpkin_core::state::PropagationStatusCP;
 use pumpkin_core::variables::IntegerVariable;
 
+use super::regular_helpers::layered_graph::LayeredGraph;
+use super::regular_helpers::dfa::DFA;
+
 #[derive(Clone, Debug)]
 pub struct RegularPropagatorConstructor<Var> {
     pub sequence: Box<[Var]>,
@@ -18,8 +21,6 @@ pub struct RegularPropagatorConstructor<Var> {
     pub transition_matrix: Vec<Vec<i32>>,
     pub initial_state: i32,
     pub accepting_states: Vec<i32>,
-
-    // pub internal_graph: LayeredGraph,
 
     pub constraint_tag: ConstraintTag,
 }
@@ -45,15 +46,13 @@ impl<Var: IntegerVariable + 'static> PropagatorConstructor for RegularPropagator
       }
 
       // Build Internal Graph
+      let dfa = DFA::from(num_states, num_inputs, transition_matrix, initial_state, accepting_states);
+      let internal_graph = LayeredGraph::from((dfa, sequence.len()));
 
       // Return Constructed Regular Propagator
       RegularPropagator {
           sequence,
-          num_states,
-          num_inputs,
-          transition_matrix,
-          initial_state,
-          accepting_states,
+          internal_graph,
           inference_code: InferenceCode::new(constraint_tag, RegularDfa),
       }
     }
@@ -62,18 +61,13 @@ impl<Var: IntegerVariable + 'static> PropagatorConstructor for RegularPropagator
 #[derive(Clone, Debug)]
 pub struct RegularPropagator<Var> {
     sequence: Box<[Var]>,
-    num_states: u32,
-    num_inputs: u32,
-    transition_matrix: Vec<Vec<i32>>,
-    initial_state: i32,
-    accepting_states: Vec<i32>,
-
+    internal_graph: LayeredGraph,
     inference_code: InferenceCode,
 }
 
 impl<Var: IntegerVariable + 'static> Propagator for RegularPropagator<Var> {
     fn name(&self) -> &str {
-        todo!()
+        "RegularDFAPropagator"
     }
 
     fn propagate_from_scratch(&self, context: PropagationContext) -> PropagationStatusCP {

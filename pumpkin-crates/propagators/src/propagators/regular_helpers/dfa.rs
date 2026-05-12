@@ -17,3 +17,36 @@ where
     pub(crate) starting_state: usize,
     pub(crate) accepting_states: HashSet<usize>,
 }
+
+impl DFA<Letter> {
+    pub fn from(
+        num_states: u32,
+        num_inputs: u32,
+        transition_matrix: Vec<Vec<i32>>,
+        initial_state: i32,
+        accepting_states: Vec<i32>,
+    ) -> Self {
+        let alphabet: HashSet<Letter> = (0..num_inputs as Letter).collect();
+
+        let transitions: HashMap<(usize, Letter), usize> = transition_matrix
+            .iter()
+            .enumerate()
+            .flat_map(|(state, row)| {
+                row.iter()
+                    .enumerate()
+                    .map(move |(input, &next_state)| ((state, input as Letter), next_state as usize))
+            })
+            .collect();
+
+        let accepting_states: HashSet<usize> = 
+            accepting_states.iter().map(|&s| s as usize).collect();
+
+        DFA {
+            states: num_states as usize,
+            alphabet,
+            transitions,
+            starting_state: initial_state as usize,
+            accepting_states,
+        }
+    }
+}
