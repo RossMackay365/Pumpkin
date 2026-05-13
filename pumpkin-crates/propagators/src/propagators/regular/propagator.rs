@@ -1,16 +1,27 @@
+use std::collections::HashSet;
+
+use pumpkin_checking::AtomicConstraint;
+use pumpkin_checking::CheckerVariable;
+use pumpkin_checking::InferenceChecker;
+use pumpkin_checking::VariableState;
 use pumpkin_core::declare_inference_label;
+use pumpkin_core::predicate;
+use pumpkin_core::predicates::PropositionalConjunction;
 use pumpkin_core::proof::ConstraintTag;
 use pumpkin_core::proof::InferenceCode;
+use pumpkin_core::propagation::DomainEvents;
+use pumpkin_core::propagation::InferenceCheckers;
+use pumpkin_core::propagation::LocalId;
 use pumpkin_core::propagation::PropagationContext;
 use pumpkin_core::propagation::Propagator;
 use pumpkin_core::propagation::PropagatorConstructor;
 use pumpkin_core::propagation::PropagatorConstructorContext;
-use pumpkin_core::propagation::LocalId;
-use pumpkin_core::propagation::DomainEvents;
+use pumpkin_core::propagation::ReadDomains;
 use pumpkin_core::state::PropagationStatusCP;
+use pumpkin_core::state::propagator_conflict;
 use pumpkin_core::variables::IntegerVariable;
 
-use crate::propagators::regular_helpers::{DFA, LayeredGraph};
+use crate::propagators::regular_helpers::{DFA, LayeredGraph, Letter};
 
 #[derive(Clone, Debug)]
 pub struct RegularPropagatorConstructor<Var> {
@@ -28,6 +39,26 @@ declare_inference_label!(RegularDfa);
 impl<Var: IntegerVariable + 'static> PropagatorConstructor for RegularPropagatorConstructor<Var> {
     type PropagatorImpl = RegularPropagator<Var>;
 
+    fn add_inference_checkers(&self, mut checkers: InferenceCheckers<'_>) {
+        // Construct DFA
+        let dfa = DFA::from(
+            self.num_states,
+            self.num_inputs,
+            self.transition_matrix.clone(),
+            self.initial_state,
+            self.accepting_states.clone(),
+        );
+
+        // Add Inference Checker
+        checkers.add_inference_checker(
+            InferenceCode::new(self.constraint_tag, RegularDfa),
+            Box::new(RegularChecker {
+                sequence: self.sequence.clone(),
+                dfa,
+            }),
+        );
+    }
+
     fn create(self, mut context: PropagatorConstructorContext) -> Self::PropagatorImpl {
       let RegularPropagatorConstructor {
           sequence,
@@ -38,13 +69,13 @@ impl<Var: IntegerVariable + 'static> PropagatorConstructor for RegularPropagator
           accepting_states,
           constraint_tag,
       } = self;
-      
+
       // Register Variables with Solver
       for (idx, var) in sequence.iter().enumerate() {
-          context.register(var.clone(), DomainEvents::BOUNDS, LocalId::from(idx as u32));
+          context.register(var.clone(), DomainEvents::ANY_INT, LocalId::from(idx as u32));
       }
 
-      // Build Internal Graph
+      // Build DFA and Internal Graph
       let dfa = DFA::from(num_states, num_inputs, transition_matrix, initial_state, accepting_states);
       let internal_graph = LayeredGraph::from((dfa, sequence.len()));
 
@@ -69,7 +100,146 @@ impl<Var: IntegerVariable + 'static> Propagator for RegularPropagator<Var> {
         "RegularDFAPropagator"
     }
 
-    fn propagate_from_scratch(&self, context: PropagationContext) -> PropagationStatusCP {
-        todo!()
+    // Propagation Three Step Approach:
+      // Step 1: Update Graph to Represent Current Domain Values (Kill_Externally_Removed)
+      // Step 2: Check for Conflicts (i.e. No Accepting Paths Exist)
+      // Step 3: Core Propagation -> Remove Values with no Future Accepting Paths
+    fn propagate_from_scratch(&self, mut context: PropagationContext) -> PropagationStatusCP {
+        let mut graph = self.internal_graph.clone();
+
+        let removed = self.kill_externally_removed(&context, &mut graph);
+
+        if let Some(conflict) = self.detect_conflict(&graph, removed) {
+            return conflict;
+        }
+
+        self.propagate_into_domains(&mut context, &graph)
+    }
+}
+
+impl<Var: IntegerVariable + 'static> RegularPropagator<Var> {
+
+    // Updates Layered Graph to Represent Current Domain Values
+    fn kill_externally_removed(
+        &self,
+        context: &PropagationContext<'_>,
+        graph: &mut LayeredGraph,
+    ) -> HashSet<(usize, i32)> {
+        let mut removed: HashSet<(usize, i32)> = HashSet::new();
+
+        // Take Set Difference Between Values Alive in Graph and Values Alive in Variable Domain
+        for (idx, var) in self.sequence.iter().enumerate() {
+            let alive_in_graph: HashSet<i32> = graph.living_values(idx).into_iter().collect();
+            let in_domain: HashSet<i32> = context.iterate_domain(var).collect();
+
+            // Kill Values in Set Difference
+            for &letter in alive_in_graph.difference(&in_domain) {
+                graph.kill_value(idx, letter);
+                let _ = removed.insert((idx, letter));
+            }
+        }
+
+        // Return Removed Values
+        removed
+    }
+
+    // Check if Current Domain Values have Accepting Path -> Otherwise, Construct Conflict Explanation
+    fn detect_conflict(
+        &self,
+        graph: &LayeredGraph,
+        removed: HashSet<(usize, i32)>,
+    ) -> Option<PropagationStatusCP> {
+        // Graph is Consistent -> No Conflict
+        if graph.is_consistent() {
+            return None;
+        }
+
+        // Constructed Conflict Explanation: Combination of Previously Removed Values
+        let reason: PropositionalConjunction = removed
+            .into_iter()
+            .map(|(idx, letter)| predicate![self.sequence[idx] != letter])
+            .collect();
+
+        Some(propagator_conflict(reason, &self.inference_code))
+    }
+
+    // Core Propagation -> Remove Values with no Future Accepting Paths
+    fn propagate_into_domains(
+        &self,
+        context: &mut PropagationContext<'_>,
+        graph: &LayeredGraph,
+    ) -> PropagationStatusCP {
+        for (idx, var) in self.sequence.iter().enumerate() {
+            let alive_in_graph: HashSet<i32> = graph.living_values(idx).into_iter().collect();
+            let in_domain: Vec<i32> = context.iterate_domain(var).collect();
+
+            // If No Future Accepting Path Exists with Value, Remove from Domain with Generated Explanation
+            for value in in_domain {
+                if alive_in_graph.contains(&value) {
+                    continue;
+                }
+
+                let reason: PropositionalConjunction = graph
+                    .explain_removal(idx, value)
+                    .into_iter()
+                    .map(|(j, letter)| predicate![self.sequence[j] != letter])
+                    .collect();
+
+                context.post(
+                    predicate![var != value],
+                    (reason, &self.inference_code),
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RegularChecker<Var> {
+    sequence: Box<[Var]>,
+    dfa: DFA<Letter>,
+}
+
+impl<Var, Atomic> InferenceChecker<Atomic> for RegularChecker<Var>
+where
+    Var: CheckerVariable<Atomic>,
+    Atomic: AtomicConstraint,
+{
+    fn check(&self, state: VariableState<Atomic>, _: &[Atomic], _: Option<&Atomic>) -> bool {
+        // Track Reachable States
+        let mut reachable: HashSet<usize> = HashSet::new();
+        let _ = reachable.insert(self.dfa.starting_state);
+
+        // Iterate Through Layers -> Tracking Reachable States
+        for var in self.sequence.iter() {
+            let mut next_reachable: HashSet<usize> = HashSet::new();
+
+            // For Each Input in Each Reachable State
+            for &q in &reachable {
+                for &letter in &self.dfa.alphabet {
+                    // Skip Inputs Removed from Variable Domain
+                    if !var.induced_domain_contains(&state, letter) {
+                        continue;
+                    }
+                    // Add Next State to Next_Reachable
+                    if let Some(&q_next) = self.dfa.transitions.get(&(q, letter)) {
+                        let _ = next_reachable.insert(q_next);
+                    }
+                }
+            }
+
+            // Update Reachable
+            reachable = next_reachable;
+
+            // No States are Reachable -> Conflict Detected
+            if reachable.is_empty() {
+                return true;
+            }
+        }
+
+        // Conflict Detected if Accepting States and Reachable are Disjoint
+        reachable.is_disjoint(&self.dfa.accepting_states)
     }
 }
