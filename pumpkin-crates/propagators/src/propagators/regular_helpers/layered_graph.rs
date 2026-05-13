@@ -7,7 +7,7 @@ use std::hash::Hash;
 
 use itertools::Itertools;
 
-use crate::propagators::regular_helpers::{DrawEdge, DrawNode, DrawnGraph, GraphDraw, DFA};
+use crate::propagators::regular_helpers::{DrawEdge, DrawNode, DrawnGraph, GraphDraw, DFA, NFA};
 
 #[derive(Debug, Clone)]
 #[allow(dead_code, reason = "not implemented yet")]
@@ -169,6 +169,105 @@ impl From<(DFA<Letter>, usize)> for LayeredGraph {
 
         // Move alphabet
         let mut alphabet = Vec::from_iter(dfa.alphabet);
+        alphabet.sort();
+
+        let mut layered_graph = LayeredGraph {
+            alphabet,
+            layers,
+            arcs,
+            arc_life,
+            node_life,
+            accepting,
+            starting,
+            domain,
+            state_count,
+        };
+
+        layered_graph.backward_pass();
+
+        layered_graph
+    }
+}
+
+impl From<(NFA<Letter>, usize)> for LayeredGraph {
+    fn from((nfa, var_count): (NFA<Letter>, usize)) -> Self {
+        let layer_count = var_count + 1;
+        let state_count = nfa.states;
+
+        // Forward pass: identical to the DFA case, except each (state, letter) may yield
+        // multiple next states (NFA non-determinism). Each next state becomes its own Arc.
+        let (layers, node_life, arcs, arc_life) = {
+            let initial_node = Node {
+                layer: 0,
+                state: nfa.starting_state,
+            };
+            let mut queue = VecDeque::from(vec![initial_node]);
+            let mut next_queue = VecDeque::new();
+
+            let mut layers = Vec::new();
+            let mut outbound_arcs: HashMap<Node, HashSet<Arc>> = HashMap::default();
+            let mut inbound_arcs: HashMap<Node, HashSet<Arc>> = HashMap::default();
+            let mut node_life = HashMap::default();
+            let mut arc_life: HashMap<Arc, bool> = HashMap::default();
+
+            for layer_index in 0..layer_count {
+                let mut layer = HashSet::default();
+
+                while let Some(node) = queue.pop_front() {
+                    let _ = layer.insert(node);
+                    let _ = node_life.insert(node, true);
+
+                    if layer_index < var_count {
+                        for letter in &nfa.alphabet {
+                            if let Some(end_states) =
+                                nfa.transitions.get(&(node.state, *letter))
+                            {
+                                // Loop over possible next states
+                                for &end_state in end_states {
+                                    let arc = Arc {
+                                        start_layer: layer_index,
+                                        start_state: node.state,
+                                        end_state,
+                                        letter: *letter,
+                                    };
+
+                                    let to_node = arc.end();
+
+                                    next_queue.push_back(to_node);
+                                    let _ = arc_life.insert(arc, true);
+                                    let _ = outbound_arcs.entry(node).or_default().insert(arc);
+                                    let _ = inbound_arcs.entry(to_node).or_default().insert(arc);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                layers.push(layer);
+
+                std::mem::swap(&mut queue, &mut next_queue);
+            }
+
+            let arcs = Arcs {
+                outbound: outbound_arcs,
+                inbound: inbound_arcs,
+            };
+
+            (layers, node_life, arcs, arc_life)
+        };
+        debug_assert_eq!(layers.len(), layer_count);
+
+        let mut accepting = Vec::from_iter(nfa.accepting_states);
+        accepting.sort();
+
+        let starting = nfa.starting_state;
+
+        let mut domain = HashMap::default();
+        for variable_index in 0..var_count {
+            let _ = domain.insert(variable_index, nfa.alphabet.clone());
+        }
+
+        let mut alphabet = Vec::from_iter(nfa.alphabet);
         alphabet.sort();
 
         let mut layered_graph = LayeredGraph {
