@@ -105,6 +105,7 @@ impl From<(DFA<Letter>, usize)> for LayeredGraph {
             };
             let mut queue = VecDeque::from(vec![initial_node]);
             let mut next_queue = VecDeque::new();
+            let mut next_seen: HashSet<Node> = HashSet::default();
 
             let mut layers = Vec::new();
             let mut outbound_arcs: HashMap<Node, HashSet<Arc>> = HashMap::default();
@@ -114,9 +115,12 @@ impl From<(DFA<Letter>, usize)> for LayeredGraph {
 
             for layer_index in 0..layer_count {
                 let mut layer = HashSet::default();
+                next_seen.clear();
 
                 while let Some(node) = queue.pop_front() {
-                    let _ = layer.insert(node);
+                    if !layer.insert(node) {
+                        continue;
+                    }
                     let _ = node_life.insert(node, true);
 
                     if layer_index < var_count {
@@ -131,7 +135,9 @@ impl From<(DFA<Letter>, usize)> for LayeredGraph {
 
                                 let to_node = arc.end();
 
-                                next_queue.push_back(to_node);
+                                if next_seen.insert(to_node) {
+                                    next_queue.push_back(to_node);
+                                }
                                 let _ = arc_life.insert(arc, true);
                                 let _ = outbound_arcs.entry(node).or_default().insert(arc);
                                 let _ = inbound_arcs.entry(to_node).or_default().insert(arc);
@@ -203,6 +209,7 @@ impl From<(NFA<Letter>, usize)> for LayeredGraph {
             };
             let mut queue = VecDeque::from(vec![initial_node]);
             let mut next_queue = VecDeque::new();
+            let mut next_seen: HashSet<Node> = HashSet::default();
 
             let mut layers = Vec::new();
             let mut outbound_arcs: HashMap<Node, HashSet<Arc>> = HashMap::default();
@@ -212,9 +219,12 @@ impl From<(NFA<Letter>, usize)> for LayeredGraph {
 
             for layer_index in 0..layer_count {
                 let mut layer = HashSet::default();
+                next_seen.clear();
 
                 while let Some(node) = queue.pop_front() {
-                    let _ = layer.insert(node);
+                    if !layer.insert(node) {
+                        continue;
+                    }
                     let _ = node_life.insert(node, true);
 
                     if layer_index < var_count {
@@ -233,7 +243,9 @@ impl From<(NFA<Letter>, usize)> for LayeredGraph {
 
                                     let to_node = arc.end();
 
-                                    next_queue.push_back(to_node);
+                                    if next_seen.insert(to_node) {
+                                        next_queue.push_back(to_node);
+                                    }
                                     let _ = arc_life.insert(arc, true);
                                     let _ = outbound_arcs.entry(node).or_default().insert(arc);
                                     let _ = inbound_arcs.entry(to_node).or_default().insert(arc);
@@ -314,7 +326,9 @@ impl LayeredGraph {
 
         while !queue.is_empty() {
             while let Some(node) = queue.pop_front() {
-                let _ = marked.insert(node);
+                if !marked.insert(node) {
+                    continue;
+                }
                 for arc in self.inbound_edges_all(node) {
                     next_queue.push_back(arc.start());
                 }
