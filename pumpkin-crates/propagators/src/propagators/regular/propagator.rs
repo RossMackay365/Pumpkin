@@ -253,88 +253,88 @@ mod tests {
     use super::*;
     use crate::StateExt;
 
-    // 2-state DFA accepting binary strings that end in `1`:
-    //   - state 0: initial, non-accepting.
-    //   - state 1: accepting.
-    //   - transition(_, 0) = 0, transition(_, 1) = 1.
-    fn ends_in_one_dfa() -> DFA<Letter> {
+    // 2-state DFA accepting binary strings (alphabet {1, 2}) that end in `2`:
+    //   - state 1: initial, non-accepting.
+    //   - state 2: accepting.
+    //   - transition(_, 1) = 1, transition(_, 2) = 2.
+    fn ends_in_two_dfa() -> DFA<Letter> {
         DFA::from(
             /* num_states */ 2,
             /* num_inputs */ 2,
-            /* transition_matrix */ vec![vec![0, 1], vec![0, 1]],
-            /* initial_state */ 0,
-            /* accepting_states */ vec![1],
+            /* transition_matrix */ vec![vec![1, 2], vec![1, 2]],
+            /* initial_state */ 1,
+            /* accepting_states */ vec![2],
         )
     }
 
-    fn ends_in_one_transition_matrix() -> Vec<Vec<i32>> {
-        vec![vec![0, 1], vec![0, 1]]
+    fn ends_in_two_transition_matrix() -> Vec<Vec<i32>> {
+        vec![vec![1, 2], vec![1, 2]]
     }
 
     // Propagator Tests
     #[test]
-    fn last_letter_propagated_to_one_on_length_two() {
+    fn last_letter_propagated_to_two_on_length_two() {
         let mut state = State::default();
 
-        let x0 = state.new_interval_variable(0, 1, None);
-        let x1 = state.new_interval_variable(0, 1, None);
+        let x0 = state.new_interval_variable(1, 2, None);
+        let x1 = state.new_interval_variable(1, 2, None);
         let constraint_tag = state.new_constraint_tag();
 
         let _ = state.add_propagator(RegularPropagatorConstructor {
             sequence: vec![x0, x1].into(),
             num_states: 2,
             num_inputs: 2,
-            transition_matrix: ends_in_one_transition_matrix(),
-            initial_state: 0,
-            accepting_states: vec![1],
+            transition_matrix: ends_in_two_transition_matrix(),
+            initial_state: 1,
+            accepting_states: vec![2],
             constraint_tag,
         });
         state.propagate_to_fixed_point().expect("no empty domains");
 
-        state.assert_bounds(x0, 0, 1);
-        state.assert_bounds(x1, 1, 1);
+        state.assert_bounds(x0, 1, 2);
+        state.assert_bounds(x1, 2, 2);
     }
 
     #[test]
     fn only_last_letter_is_forced_on_length_three() {
         let mut state = State::default();
 
-        let x0 = state.new_interval_variable(0, 1, None);
-        let x1 = state.new_interval_variable(0, 1, None);
-        let x2 = state.new_interval_variable(0, 1, None);
+        let x0 = state.new_interval_variable(1, 2, None);
+        let x1 = state.new_interval_variable(1, 2, None);
+        let x2 = state.new_interval_variable(1, 2, None);
         let constraint_tag = state.new_constraint_tag();
 
         let _ = state.add_propagator(RegularPropagatorConstructor {
             sequence: vec![x0, x1, x2].into(),
             num_states: 2,
             num_inputs: 2,
-            transition_matrix: ends_in_one_transition_matrix(),
-            initial_state: 0,
-            accepting_states: vec![1],
+            transition_matrix: ends_in_two_transition_matrix(),
+            initial_state: 1,
+            accepting_states: vec![2],
             constraint_tag,
         });
         state.propagate_to_fixed_point().expect("no empty domains");
 
-        state.assert_bounds(x0, 0, 1);
-        state.assert_bounds(x1, 0, 1);
-        state.assert_bounds(x2, 1, 1);
+        state.assert_bounds(x0, 1, 2);
+        state.assert_bounds(x1, 1, 2);
+        state.assert_bounds(x2, 2, 2);
     }
 
     #[test]
-    fn conflict_when_last_letter_pre_assigned_zero() {
+    fn conflict_when_last_letter_pre_assigned_one() {
         let mut state = State::default();
 
-        let x0 = state.new_interval_variable(0, 1, None);
-        let x1 = state.new_interval_variable(0, 0, None);
+        let x0 = state.new_interval_variable(1, 2, None);
+        let x1 = state.new_interval_variable(1, 1, None);
         let constraint_tag = state.new_constraint_tag();
 
         let _ = state.add_propagator(RegularPropagatorConstructor {
             sequence: vec![x0, x1].into(),
             num_states: 2,
             num_inputs: 2,
-            transition_matrix: ends_in_one_transition_matrix(),
-            initial_state: 0,
-            accepting_states: vec![1],
+            transition_matrix: ends_in_two_transition_matrix(),
+            initial_state: 1,
+            accepting_states: vec![2],
             constraint_tag,
         });
 
@@ -344,11 +344,11 @@ mod tests {
     // Checker Tests
     #[test]
     fn conflict_detected_on_unsatisfiable_premise() {
-        // Force Final Letter to Zero -> Always UNSAT -> Conflict
+        // Force Final Letter to 1 -> Always UNSAT -> Conflict
         let premises = [TestAtomic {
             name: "x1",
             comparison: pumpkin_checking::Comparison::Equal,
-            value: 0,
+            value: 1,
         }];
 
         let state = VariableState::prepare_for_conflict_check(premises, None)
@@ -356,7 +356,7 @@ mod tests {
 
         let checker = RegularChecker {
             sequence: vec!["x0", "x1"].into(),
-            dfa: ends_in_one_dfa(),
+            dfa: ends_in_two_dfa(),
         };
 
         assert!(checker.check(state, &premises, None));
@@ -364,11 +364,11 @@ mod tests {
 
     #[test]
     fn no_conflict_detected_on_satisfiable_premise() {
-        // Force Second Letter to 1 -> Always SAT -> No Conflict
+        // Force First Letter to 2 -> x1 free, accepting path "2,2" exists -> No Conflict
         let premises = [TestAtomic {
             name: "x0",
             comparison: pumpkin_checking::Comparison::Equal,
-            value: 1,
+            value: 2,
         }];
 
         let state = VariableState::prepare_for_conflict_check(premises, None)
@@ -376,7 +376,7 @@ mod tests {
 
         let checker = RegularChecker {
             sequence: vec!["x0", "x1"].into(),
-            dfa: ends_in_one_dfa(),
+            dfa: ends_in_two_dfa(),
         };
 
         assert!(!checker.check(state, &premises, None));
@@ -384,18 +384,18 @@ mod tests {
 
     #[test]
     fn conflict_detected_on_valid_premise_consequent() {
-        // Force First Letter to Zero -> Consequent is Second Letter is 1 -> Premise & (Not) Consequent = Conflict
-        // Premises: x0 = 0. Consequent: x1 = 1.
+        // Force First Letter to 1 -> Consequent is Second Letter is 2 -> Premise & (Not) Consequent = Conflict
+        // Premises: x0 = 1. Consequent: x1 = 2.
         let premises = [TestAtomic {
             name: "x0",
             comparison: pumpkin_checking::Comparison::Equal,
-            value: 0,
+            value: 1,
         }];
 
         let consequent = Some(TestAtomic {
             name: "x1",
             comparison: pumpkin_checking::Comparison::Equal,
-            value: 1,
+            value: 2,
         });
 
         let state = VariableState::prepare_for_conflict_check(premises, consequent)
@@ -403,7 +403,7 @@ mod tests {
 
         let checker = RegularChecker {
             sequence: vec!["x0", "x1"].into(),
-            dfa: ends_in_one_dfa(),
+            dfa: ends_in_two_dfa(),
         };
 
         assert!(checker.check(state, &premises, consequent.as_ref()));
