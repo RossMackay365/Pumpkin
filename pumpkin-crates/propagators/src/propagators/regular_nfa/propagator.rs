@@ -253,3 +253,172 @@ where
         reachable.is_disjoint(&self.nfa.accepting_states)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use pumpkin_checking::TestAtomic;
+    use pumpkin_checking::VariableState;
+    use pumpkin_core::state::State;
+
+    use super::*;
+    use crate::StateExt;
+
+    // 2-state NFA accepting binary strings that start with `0`:
+    //   - state 0: initial, non-accepting.
+    //   - state 1: accepting.
+    //   - state 0: letter 0 -> {0, 1} (nondeterministic, deliberately involves multi-successors), letter 1 -> {} (trap).
+    //   - state 1: letter 0 -> {1},    letter 1 -> {1}.
+    fn starts_with_zero_nfa() -> NFA<Letter> {
+        NFA::from(
+            /* num_states */ 2,
+            /* num_inputs */ 2,
+            /* transition_matrix */
+            vec![
+                vec![vec![0, 1], vec![]],
+                vec![vec![1], vec![1]],
+            ],
+            /* initial_state */ 0,
+            /* accepting_states */ vec![1],
+        )
+    }
+
+    fn starts_with_zero_transition_matrix() -> Vec<Vec<Vec<i32>>> {
+        vec![
+            vec![vec![0, 1], vec![]],
+            vec![vec![1], vec![1]],
+        ]
+    }
+
+    // Propagator Tests
+    #[test]
+    fn first_letter_propagated_to_zero_on_length_two() {
+        let mut state = State::default();
+
+        let x0 = state.new_interval_variable(0, 1, None);
+        let x1 = state.new_interval_variable(0, 1, None);
+        let constraint_tag = state.new_constraint_tag();
+
+        let _ = state.add_propagator(RegularNfaPropagatorConstructor {
+            sequence: vec![x0, x1].into(),
+            num_states: 2,
+            num_inputs: 2,
+            transition_matrix: starts_with_zero_transition_matrix(),
+            initial_state: 0,
+            accepting_states: vec![1],
+            constraint_tag,
+        });
+        state.propagate_to_fixed_point().expect("no empty domains");
+
+        state.assert_bounds(x0, 0, 0);
+        state.assert_bounds(x1, 0, 1);
+    }
+
+    #[test]
+    fn only_first_letter_is_forced_on_length_three() {
+        let mut state = State::default();
+
+        let x0 = state.new_interval_variable(0, 1, None);
+        let x1 = state.new_interval_variable(0, 1, None);
+        let x2 = state.new_interval_variable(0, 1, None);
+        let constraint_tag = state.new_constraint_tag();
+
+        let _ = state.add_propagator(RegularNfaPropagatorConstructor {
+            sequence: vec![x0, x1, x2].into(),
+            num_states: 2,
+            num_inputs: 2,
+            transition_matrix: starts_with_zero_transition_matrix(),
+            initial_state: 0,
+            accepting_states: vec![1],
+            constraint_tag,
+        });
+        state.propagate_to_fixed_point().expect("no empty domains");
+
+        state.assert_bounds(x0, 0, 0);
+        state.assert_bounds(x1, 0, 1);
+        state.assert_bounds(x2, 0, 1);
+    }
+
+    #[test]
+    fn conflict_when_first_letter_pre_assigned_one() {
+        let mut state = State::default();
+
+        let x0 = state.new_interval_variable(1, 1, None);
+        let x1 = state.new_interval_variable(0, 1, None);
+        let constraint_tag = state.new_constraint_tag();
+
+        let _ = state.add_propagator(RegularNfaPropagatorConstructor {
+            sequence: vec![x0, x1].into(),
+            num_states: 2,
+            num_inputs: 2,
+            transition_matrix: starts_with_zero_transition_matrix(),
+            initial_state: 0,
+            accepting_states: vec![1],
+            constraint_tag,
+        });
+
+        assert!(state.propagate_to_fixed_point().is_err());
+    }
+
+    // Checker Tests
+    #[test]
+    fn conflict_detected_on_unsatisfiable_premise() {
+        // Force First Letter to One -> Trap at Initial State -> Always UNSAT -> Conflict
+        let premises = [TestAtomic {
+            name: "x0",
+            comparison: pumpkin_checking::Comparison::Equal,
+            value: 1,
+        }];
+
+        let state = VariableState::prepare_for_conflict_check(premises, None)
+            .expect("no conflicting atomics");
+
+        let checker = RegularNfaChecker {
+            sequence: vec!["x0", "x1"].into(),
+            nfa: starts_with_zero_nfa(),
+        };
+
+        assert!(checker.check(state, &premises, None));
+    }
+
+    #[test]
+    fn no_conflict_detected_on_satisfiable_premise() {
+        // Force First Letter to Zero -> Accepting Path "00" Exists -> No Conflict
+        let premises = [TestAtomic {
+            name: "x0",
+            comparison: pumpkin_checking::Comparison::Equal,
+            value: 0,
+        }];
+
+        let state = VariableState::prepare_for_conflict_check(premises, None)
+            .expect("no conflicting atomics");
+
+        let checker = RegularNfaChecker {
+            sequence: vec!["x0", "x1"].into(),
+            nfa: starts_with_zero_nfa(),
+        };
+
+        assert!(!checker.check(state, &premises, None));
+    }
+
+    #[test]
+    fn conflict_detected_on_valid_premise_consequent() {
+        // No Premise -> Consequent is First Letter is 0 -> (Not) Consequent = Conflict
+        let premises: [TestAtomic; 0] = [];
+
+        let consequent = Some(TestAtomic {
+            name: "x0",
+            comparison: pumpkin_checking::Comparison::Equal,
+            value: 0,
+        });
+
+        let state = VariableState::prepare_for_conflict_check(premises, consequent)
+            .expect("no conflicting atomics");
+
+        let checker = RegularNfaChecker {
+            sequence: vec!["x0", "x1"].into(),
+            nfa: starts_with_zero_nfa(),
+        };
+
+        assert!(checker.check(state, &premises, consequent.as_ref()));
+    }
+}
