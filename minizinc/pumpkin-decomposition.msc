@@ -1,9 +1,9 @@
 {
     "name": "Pumpkin",
-    "id": "nl.tudelft.algorithmics.pumpkin-regular",
+    "id": "nl.tudelft.algorithmics.pumpkin-decomposition",
     "version": "0.1",
     "executable": "../target/release/pumpkin-solver",
-    "mznlib": "./lib",
+    "mznlib": "./lib-decomposition",
     "stdFlags": ["-v", "-f", "-r", "-t", "-s", "-a"],
 
     "extraFlags": [
