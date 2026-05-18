@@ -25,21 +25,22 @@ impl NFA<Letter> {
         initial_state: i32,
         accepting_states: Vec<i32>,
     ) -> Self {
-        let alphabet: HashSet<Letter> = (0..num_inputs as Letter).collect();
+        let alphabet: HashSet<Letter> = (1..=num_inputs as Letter).collect();
 
         let transitions: HashMap<(usize, Letter), Vec<usize>> = transition_matrix
             .into_iter()
             .enumerate()
-            .flat_map(|(state, row)| {
+            .flat_map(|(state_idx, row)| {
                 row.into_iter()
                     .enumerate()
-                    .filter_map(move |(input, next_states)| {
+                    .filter_map(move |(input_idx, next_states)| {
+                        // Skip empty set (MZN convention for no transition).
                         if next_states.is_empty() {
                             None
                         } else {
                             let targets: Vec<usize> =
                                 next_states.into_iter().map(|q| q as usize).collect();
-                            Some(((state, input as Letter), targets))
+                            Some(((state_idx + 1, (input_idx + 1) as Letter), targets))
                         }
                     })
             })
