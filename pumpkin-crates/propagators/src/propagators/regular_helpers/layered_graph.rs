@@ -538,7 +538,10 @@ impl LayeredGraph {
             }
             for node in &queue {
                 for edge in self.outbound_edges_all(*node) {
-                    if edge.start_layer != variable_index && reaches_accepting.contains(&edge.end())
+                    // Only Add Literals Removed from Domain
+                    if edge.start_layer != variable_index
+                        && reaches_accepting.contains(&edge.end())
+                        && !self.is_in_domain(*edge)
                     {
                         let _ = explanation.insert((edge.start_layer, edge.letter));
                     }
@@ -569,17 +572,30 @@ impl LayeredGraph {
         letter: Letter,
     ) -> impl IntoIterator<Item = Node> {
         let mut reaches_accepting: HashSet<Node> = HashSet::default();
-        // Initialize using accepting nodes
+        // Initialize Using Accepting Nodes
         let last_layer = self.layers.len() - 1;
-        let accepting = self.accepting.iter().flat_map(|state| {
-            let node = Node {
-                state: *state,
-                layer: last_layer,
-            };
-            self.layers[last_layer].get(&node)
-        });
-        let mut queue =
-            VecDeque::from_iter(accepting.flat_map(|node| self.inbound_edges_all(*node)));
+        let accepting_nodes: Vec<Node> = self
+            .accepting
+            .iter()
+            .filter_map(|state| {
+                self.layers[last_layer]
+                    .get(&Node {
+                        state: *state,
+                        layer: last_layer,
+                    })
+                    .copied()
+            })
+            .collect();
+
+        // Add Accepting Nodes to Reaches Accepting
+        for &node in &accepting_nodes {
+            let _ = reaches_accepting.insert(node);
+        }
+
+        let mut queue: VecDeque<&Arc> = VecDeque::new();
+        for &node in &accepting_nodes {
+            queue.extend(self.inbound_edges_all(node));
+        }
 
         while let Some(edge) = queue.pop_front() {
             if reaches_accepting.contains(&edge.start()) {
