@@ -201,23 +201,23 @@ impl<Var: IntegerVariable + 'static, CVar: IntegerVariable + 'static> Propagator
 
         // For each variable in sequence.
         for (i, var) in self.sequence.iter().enumerate() {
+            // Get the states that can be the ith state,
+            // with the minimum and maximum costs to get
+            // from the start to them and from them to the end.
+            let min_qcf = min_qcf_table.get(i).unwrap();
+            let max_qcf = max_qcf_table.get(i).unwrap();
+            let qcf = combine_table(min_qcf, max_qcf);
+
+            let min_qcb = min_qcb_table.get(n - i - 1).unwrap();
+            let max_qcb = max_qcb_table.get(n - i - 1).unwrap();
+            let qcb = combine_table(min_qcb, max_qcb);
+
             // For each symbol in their domain.
             'symbols: for l in context
                 .iterate_domain(var)
                 .map(|l| l as usize - 1)
                 .collect_vec()
             {
-                // Get the states that can be the ith state,
-                // with the minimum and maximum costs to get
-                // from the start to them and from them to the end.
-                let min_qcf = min_qcf_table.get(i).unwrap();
-                let max_qcf = max_qcf_table.get(i).unwrap();
-                let qcf = combine_table(min_qcf, max_qcf);
-
-                let min_qcb = min_qcb_table.get(n - i - 1).unwrap();
-                let max_qcb = max_qcb_table.get(n - i - 1).unwrap();
-                let qcb = combine_table(min_qcb, max_qcb);
-
                 let mut impossible_count_predicates =
                     conjunction!([self.count >= lb] & [self.count <= ub]);
 
@@ -248,6 +248,7 @@ impl<Var: IntegerVariable + 'static, CVar: IntegerVariable + 'static> Propagator
                             }
                         } else {
                             // go to the next symbol.
+
                             continue 'symbols;
                         }
                     }
@@ -441,6 +442,15 @@ where
     fn check(&self, state: VariableState<Atomic>, _: &[Atomic], _: Option<&Atomic>) -> bool {
         let n = self.sequence.len();
 
+        // let lb = match self.count.induced_lower_bound(&state) {
+        //     IntExt::Int(v) => Some(v),
+        //     _ => None,
+        // };
+        // let ub = match self.count.induced_upper_bound(&state) {
+        //     IntExt::Int(v) => Some(v),
+        //     _ => None,
+        // };
+
         // Get all possible counts after consuming the sequence.
         let qcf_table = &mut Vec::with_capacity(n + 1);
         compute_qcf_for_check(&self.sequence, &self.c_dfa, &state, qcf_table, n);
@@ -510,6 +520,7 @@ fn compute_qcf_for_check<Var: CheckerVariable<Atomic>, Atomic: AtomicConstraint>
     c_dfa: &Cdfa,
     state: &VariableState<Atomic>,
     qcf_table: &mut Vec<Vec<(u32, Vec<u32>)>>,
+
     i: usize,
 ) {
     let n = sequence.len();
@@ -542,11 +553,6 @@ fn compute_qcf_for_check<Var: CheckerVariable<Atomic>, Atomic: AtomicConstraint>
             })
             .collect_vec();
 
-        // println!("{q}: symbols");
-        // for &c in symbols.iter() {
-        //     println!("{c}, ")
-        // }
-
         for &l in symbols.iter() {
             let new_q = c_dfa.transition_matrix[q][l];
             let new_counts = counts.iter().map(|&c| c + c_dfa.inc[q][l]).collect_vec();
@@ -563,14 +569,6 @@ fn compute_qcf_for_check<Var: CheckerVariable<Atomic>, Atomic: AtomicConstraint>
         .map(|(q, counts)| (*q, counts.concat()))
         .sorted_by(|(q1, _), (q2, _)| q1.cmp(q2))
         .collect_vec();
-
-    // println!("new_counts:");
-    // for (q, counts) in new_vec.iter() {
-    //     println!("{q}: counts:");
-    //     for &c in counts.iter() {
-    //         println!("{c}, ")
-    //     }
-    // }
 
     qcf_table.insert(index, new_vec);
 }
