@@ -248,7 +248,6 @@ impl<Var: IntegerVariable + 'static, CVar: IntegerVariable + 'static> Propagator
                             }
                         } else {
                             // go to the next symbol.
-
                             continue 'symbols;
                         }
                     }
