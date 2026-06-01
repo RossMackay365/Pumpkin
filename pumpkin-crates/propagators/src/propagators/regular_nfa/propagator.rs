@@ -21,7 +21,9 @@ use pumpkin_core::state::PropagationStatusCP;
 use pumpkin_core::state::propagator_conflict;
 use pumpkin_core::variables::IntegerVariable;
 
-use crate::propagators::regular_helpers::{LayeredGraph, Letter, NFA};
+use crate::propagators::regular_helpers::LayeredGraph;
+use crate::propagators::regular_helpers::Letter;
+use crate::propagators::regular_helpers::NFA;
 
 #[derive(Clone, Debug)]
 pub struct RegularNfaPropagatorConstructor<Var> {
@@ -50,7 +52,7 @@ impl<Var: IntegerVariable + 'static> PropagatorConstructor
             self.initial_state,
             self.accepting_states.clone(),
         );
-        
+
         // Add Inference Checker
         checkers.add_inference_checker(
             InferenceCode::new(self.constraint_tag, RegularNfa),
@@ -61,7 +63,6 @@ impl<Var: IntegerVariable + 'static> PropagatorConstructor
         );
     }
 
-    
     fn create(self, mut context: PropagatorConstructorContext) -> Self::PropagatorImpl {
         let RegularNfaPropagatorConstructor {
             sequence,
@@ -75,7 +76,11 @@ impl<Var: IntegerVariable + 'static> PropagatorConstructor
 
         // Register Variables with Solver
         for (idx, var) in sequence.iter().enumerate() {
-            context.register(var.clone(), DomainEvents::ANY_INT, LocalId::from(idx as u32));
+            context.register(
+                var.clone(),
+                DomainEvents::ANY_INT,
+                LocalId::from(idx as u32),
+            );
         }
 
         // Build NFA and Internal Graph
@@ -110,9 +115,9 @@ impl<Var: IntegerVariable + 'static> Propagator for RegularNfaPropagator<Var> {
     }
 
     // Propagation Three Step Approach:
-      // Step 1: Update Graph to Represent Current Domain Values (Kill_Externally_Removed)
-      // Step 2: Check for Conflicts (i.e. No Accepting Paths Exist)
-      // Step 3: Core Propagation -> Remove Values with no Future Accepting Paths
+    // Step 1: Update Graph to Represent Current Domain Values (Kill_Externally_Removed)
+    // Step 2: Check for Conflicts (i.e. No Accepting Paths Exist)
+    // Step 3: Core Propagation -> Remove Values with no Future Accepting Paths
     fn propagate_from_scratch(&self, mut context: PropagationContext) -> PropagationStatusCP {
         let mut graph = self.internal_graph.clone();
 
@@ -151,7 +156,8 @@ impl<Var: IntegerVariable + 'static> RegularNfaPropagator<Var> {
         removed
     }
 
-    // Check if Current Domain Values have Accepting Path -> Otherwise, Construct Conflict Explanation
+    // Check if Current Domain Values have Accepting Path -> Otherwise, Construct Conflict
+    // Explanation
     fn detect_conflict(
         &self,
         graph: &LayeredGraph,
@@ -180,7 +186,8 @@ impl<Var: IntegerVariable + 'static> RegularNfaPropagator<Var> {
             let alive_in_graph: HashSet<i32> = graph.living_values(idx).into_iter().collect();
             let in_domain: Vec<i32> = context.iterate_domain(var).collect();
 
-            // If No Future Accepting Path Exists with Value, Remove from Domain with Generated Explanation
+            // If No Future Accepting Path Exists with Value, Remove from Domain with Generated
+            // Explanation
             for value in in_domain {
                 if alive_in_graph.contains(&value) {
                     continue;
@@ -192,10 +199,7 @@ impl<Var: IntegerVariable + 'static> RegularNfaPropagator<Var> {
                     .map(|(j, letter)| predicate![self.sequence[j] != letter])
                     .collect();
 
-                context.post(
-                    predicate![var != value],
-                    (reason, &self.inference_code),
-                )?;
+                context.post(predicate![var != value], (reason, &self.inference_code))?;
             }
         }
 
@@ -222,7 +226,7 @@ where
         // Iterate Through Layers -> Track Reachable States
         for var in self.sequence.iter() {
             let mut next_reachable: HashSet<usize> = HashSet::new();
-            
+
             // For Each Input in Each Reachble State
             for &q in &reachable {
                 for &letter in &self.nfa.alphabet {
@@ -266,27 +270,26 @@ mod tests {
     // 2-state NFA accepting binary strings (alphabet {1, 2}) that start with `1`:
     //   - state 1: initial, non-accepting.
     //   - state 2: accepting.
-    //   - state 1: letter 1 -> {1, 2} (nondeterministic, deliberately involves multi-successors), letter 2 -> {} (trap).
+    //   - state 1: letter 1 -> {1, 2} (nondeterministic, deliberately involves multi-successors),
+    //     letter 2 -> {} (trap).
     //   - state 2: letter 1 -> {2},      letter 2 -> {2}.
     fn starts_with_one_nfa() -> NFA<Letter> {
         NFA::from(
-            /* num_states */ 2,
-            /* num_inputs */ 2,
-            /* transition_matrix */
-            vec![
-                vec![vec![1, 2], vec![]],
-                vec![vec![2], vec![2]],
-            ],
-            /* initial_state */ 1,
-            /* accepting_states */ vec![2],
+            // num_states
+            2,
+            // num_inputs
+            2,
+            // transition_matrix
+            vec![vec![vec![1, 2], vec![]], vec![vec![2], vec![2]]],
+            // initial_state
+            1,
+            // accepting_states
+            vec![2],
         )
     }
 
     fn starts_with_one_transition_matrix() -> Vec<Vec<Vec<i32>>> {
-        vec![
-            vec![vec![1, 2], vec![]],
-            vec![vec![2], vec![2]],
-        ]
+        vec![vec![vec![1, 2], vec![]], vec![vec![2], vec![2]]]
     }
 
     // Propagator Tests

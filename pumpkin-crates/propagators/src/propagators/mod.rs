@@ -10,5 +10,5 @@ pub mod disjunctive;
 pub mod element;
 pub mod regular;
 pub mod regular_cdfa;
-pub mod regular_nfa;
 pub mod regular_helpers;
+pub mod regular_nfa;

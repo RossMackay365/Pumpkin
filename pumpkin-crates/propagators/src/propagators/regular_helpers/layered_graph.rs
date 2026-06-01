@@ -1,13 +1,18 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
-use std::fmt::Display;
 use std::fmt::Debug;
+use std::fmt::Display;
 use std::hash::Hash;
 
 use itertools::Itertools;
 
-use crate::propagators::regular_helpers::{DrawEdge, DrawNode, DrawnGraph, GraphDraw, DFA, NFA};
+use crate::propagators::regular_helpers::DFA;
+use crate::propagators::regular_helpers::DrawEdge;
+use crate::propagators::regular_helpers::DrawNode;
+use crate::propagators::regular_helpers::DrawnGraph;
+use crate::propagators::regular_helpers::GraphDraw;
+use crate::propagators::regular_helpers::NFA;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code, reason = "not implemented yet")]
@@ -229,9 +234,7 @@ impl From<(NFA<Letter>, usize)> for LayeredGraph {
 
                     if layer_index < var_count {
                         for letter in &nfa.alphabet {
-                            if let Some(end_states) =
-                                nfa.transitions.get(&(node.state, *letter))
-                            {
+                            if let Some(end_states) = nfa.transitions.get(&(node.state, *letter)) {
                                 // Loop over possible next states
                                 for &end_state in end_states {
                                     let arc = Arc {
