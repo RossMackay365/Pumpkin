@@ -308,17 +308,18 @@ impl<Var: IntegerVariable + 'static, Cvar: IntegerVariable + 'static>
     //     let mut removed_symbols = conjunction!();
     //     // For each variable in sequence.
     //     for (i, var) in self.sequence.iter().enumerate() {
+    //     // Get the states that can be the ith state, with the minimum costs to get
+    //         // from the start to them and from them to the end.
+    //         let qcf = qcf_table.get(i - 1).unwrap();
+    //         let qcb = qcb_table.get(n - i).unwrap();
+
     //         // For each symbol in their domain.
     //         for l in context
     //             .iterate_domain(var)
     //             .map(|l| l as usize)
     //             .collect_vec()
     //         {
-    //             // Get the states that can be the ith state, with the minimum costs to get
-    //             // from the start to them and from them to the end.
-    //             let qcf = qcf_table.get(i - 1).unwrap();
-    //             let qcb = qcb_table.get(n - i).unwrap();
-
+    //
     //             // Compute the minimum value of c when the ith var in the sequence is l.
     //             let mut min_c = u32::MAX;
     //             for (prev_q, min_c_before) in qcf.iter().map(|&(q, c)| (q.to_usize(), c)) {
@@ -372,7 +373,7 @@ impl<Var: IntegerVariable + 'static, Cvar: IntegerVariable + 'static>
             min_c = u32::min(min_c, c)
         }
 
-        // MIN(c) <= MAX(DOM(count))
+        // MIN(c) <= DOM(count)
         context.post(
             predicate![self.count >= min_c as i32],
             (reason.clone(), &self.inference_code),
@@ -394,7 +395,7 @@ impl<Var: IntegerVariable + 'static, Cvar: IntegerVariable + 'static>
             max_c = u32::max(max_c, c)
         }
 
-        // MAX(c) >= MIN(DOM(count))
+        // MAX(c) >= DOM(count)
         context.post(
             predicate![self.count <= max_c as i32],
             (reason.clone(), &self.inference_code),
