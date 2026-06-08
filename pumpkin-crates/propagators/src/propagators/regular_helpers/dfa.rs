@@ -3,7 +3,6 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::hash::Hash;
 
-
 use super::layered_graph::Letter;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

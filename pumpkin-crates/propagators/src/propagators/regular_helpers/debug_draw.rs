@@ -58,6 +58,7 @@ pub(crate) struct DrawnGraph<Id: Clone + Debug + Display> {
     edges: Vec<DrawEdge<Id>>,
 }
 
+#[allow(dead_code, reason = "debug drawing utility")]
 impl<Id: Clone + Debug + Display> DrawnGraph<Id> {
     pub(crate) fn draw_node(&mut self, node: DrawNode<Id>) {
         self.nodes.push(node);

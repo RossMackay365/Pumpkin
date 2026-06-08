@@ -141,7 +141,8 @@ impl<Var: IntegerVariable + 'static> Propagator for RegularNfaPropagator<Var> {
         self.propagate_into_domains(&mut context, &graph)
     }
 
-    // Direct copy of `propagate_from_scratch`, but with timing statistics for 'kill_externally_removed'.
+    // Direct copy of `propagate_from_scratch`, but with timing statistics for
+    // 'kill_externally_removed'.
     fn propagate(&mut self, mut context: PropagationContext) -> PropagationStatusCP {
         let mut graph = self.internal_graph.clone();
 
@@ -224,7 +225,7 @@ impl<Var: IntegerVariable + 'static> RegularNfaPropagator<Var> {
                 }
 
                 let reason: PropositionalConjunction = graph
-                    .explain_removal(idx, value)
+                    .explain_removal_minimum(idx, value)
                     .into_iter()
                     .map(|(j, letter)| predicate![self.sequence[j] != letter])
                     .collect();

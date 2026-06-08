@@ -511,6 +511,10 @@ impl LayeredGraph {
             .filter(|edge| self.is_alive(**edge))
     }
 
+    #[allow(
+        dead_code,
+        reason = "used for debug drawing utilities"
+    )]
     fn letter_index(&self, letter: Letter) -> usize {
         self.alphabet
             .iter()
@@ -618,10 +622,172 @@ impl LayeredGraph {
         reaches_accepting
     }
 
+    // Computes a minimum-sized explanation for removing `letter` from `variable_index`,
+    // using branch-and-bound over labelled cuts in the layered graph.
+    //
+    // As with the greedy approach (explain_removal), the returned labels `(j, l)` represent
+    // literals `var_j != l`. Together with the assumption `var_i = letter`, they form a set
+    // that disconnects the start node from all accepting nodes. 
+    // 
+    // Unlike the greedy approach, this method guarantees the explanation has the minimum possible size.
+    pub(crate) fn explain_removal_minimum(
+        &self,
+        variable_index: usize,
+        letter: Letter,
+    ) -> Vec<Assignment> {
+        let last_layer = self.layers.len() - 1;
+
+        // Seed the Current Best with Greedy Explanation (Provides Branch 'n Bound with Strong Initial Upper Bound)
+        let mut best: HashSet<Assignment> = self
+            .explain_removal(variable_index, letter)
+            .into_iter()
+            .collect();
+
+        // Tracks Explored Partial Cuts - Avoids Duplicated Explorations
+        let mut visited: HashSet<Vec<Assignment>> = HashSet::default();
+
+        // Branch-and-Bound over Labelled Cuts
+        self.explain_branch_and_bound(
+            variable_index,
+            letter,
+            last_layer,
+            HashSet::default(),
+            &mut best,
+            &mut visited,
+        );
+
+        // Collect
+        best.into_iter().collect()
+    }
+
+    // Branch-and-bound over labelled cuts in the layered graph.
+    // 
+    // `fixed` - the partial cut accumulated so far.
+    // `best`- the current best.
+    // `visited` - the partial cuts already expanded.
+    fn explain_branch_and_bound(
+        &self,
+        variable_index: usize,
+        letter: Letter,
+        last_layer: usize,
+        fixed: HashSet<Assignment>,
+        best: &mut HashSet<Assignment>,
+        visited: &mut HashSet<Vec<Assignment>>,
+    ) {
+        // Bound: This brach cannot beat the current best, so prune it.
+        if fixed.len() >= best.len() {
+            return;
+        }
+
+        // Skip Previously Expanded Partial Cuts
+        let mut key: Vec<Assignment> = fixed.iter().copied().collect();
+        key.sort_unstable();
+        if !visited.insert(key) {
+            return;
+        }
+
+
+        match self.find_escaping_path(variable_index, letter, last_layer, &fixed) {
+            // No Escaping Path Exists -> Fixed is Feasible Explanation and Better than Current Best
+              // Update Best with Fixed  
+            None => {
+                *best = fixed;
+            }
+
+            // Escaping Path Exists -> Fixed is Infeasible, so Branch on Each Candidate Label to Cut
+            Some(candidates) => {
+                for label in candidates {
+                    let mut next = fixed.clone();
+                    let _ = next.insert(label);
+                    self.explain_branch_and_bound(
+                        variable_index,
+                        letter,
+                        last_layer,
+                        next,
+                        best,
+                        visited,
+                    );
+                }
+            }
+        }
+    }
+
+    // Searches for an accepting path through the layered graph, respecting the hypothesis
+    // 'var_i = letter' at layer `variable_index`.
+    //
+    // If no path exists, then the current 'fixed' cut is a feasible explanation, and disconnects
+    // the start from accepting under the hypothesis. Otherwise, the returned path is cuttable,
+    // and the locations where it's cuttable are returned, and branched upon.
+    fn find_escaping_path(
+        &self,
+        variable_index: usize,
+        letter: Letter,
+        last_layer: usize,
+        fixed: &HashSet<Assignment>,
+    ) -> Option<Vec<Assignment>> {
+        let start = self.starting_node();
+
+        // BFS over the full arc set. `came_from` records the arc first used to reach each node,
+        // so the path can be reconstructed once an accepting node is found.
+        let mut visited: HashSet<Node> = HashSet::default();
+        let mut came_from: HashMap<Node, Arc> = HashMap::default();
+        let mut queue: VecDeque<Node> = VecDeque::new();
+
+        let _ = visited.insert(start);
+        queue.push_back(start);
+
+        let mut target: Option<Node> = None;
+        while let Some(node) = queue.pop_front() {
+            // Reached an accepting node in the last layer -> escaping path found.
+            if node.layer == last_layer && self.accepting.contains(&node.state) {
+                target = Some(node);
+                break;
+            }
+
+            for arc in self.outbound_edges_all(node) {
+                // Skip Previously Cut Arcs
+                if fixed.contains(&(arc.start_layer, arc.letter)) {
+                    continue;
+                }
+                // Respect Hypothesis: Only 'Letter' is allowed at layer 'Variable_Index'
+                if arc.start_layer == variable_index && arc.letter != letter {
+                    continue;
+                }
+
+                // First time we reach `end`: remember the arc and queue it.
+                let end = arc.end();
+                if visited.insert(end) {
+                    let _ = came_from.insert(end, *arc);
+                    queue.push_back(end);
+                }
+            }
+        }
+
+        // No Accepting Node Reached -> Return None
+        // Else, Unpack Option<Node> to Node
+        let target = target?;
+
+        // Walk Path to Start, Collecting Cuttable Candidates
+          // Arcs not at hypothesis layer, who's letters have
+          // been removed from the domain (i.e. valid premise)
+        let mut candidates = Vec::new();
+        let mut current = target;
+        while current != start {
+            let arc = came_from[&current];
+            if arc.start_layer != variable_index && !self.is_in_domain(arc) {
+                candidates.push((arc.start_layer, arc.letter));
+            }
+            current = arc.start();
+        }
+
+        Some(candidates)
+    }
+
     pub(crate) fn is_consistent(&self) -> bool {
         !self.living_values(0).is_empty()
     }
 
+    #[allow(dead_code, reason = "used for debugging")]
     pub(crate) fn count_nodes(&self) -> usize {
         let mut total = 0;
 
@@ -707,5 +873,202 @@ impl GraphDraw<Node> for LayeredGraph {
         }
 
         graph
+    }
+}
+
+#[cfg(test)]
+mod minimum_explanation_tests {
+    use std::collections::HashMap;
+    use std::collections::HashSet;
+
+    use super::Arc;
+    use super::Arcs;
+    use super::LayeredGraph;
+    use super::Node;
+    use crate::propagators::regular_helpers::DFA;
+
+    // 2-state DFA over alphabet {1, 2} accepting words ending in `2` (state 1 initial,
+    // state 2 accepting; transition(_, 1) = 1, transition(_, 2) = 2).
+    fn ends_in_two_graph(var_count: usize) -> LayeredGraph {
+        let dfa = DFA::from(2, 2, vec![vec![1, 2], vec![1, 2]], 1, vec![2]);
+        LayeredGraph::from((dfa, var_count))
+    }
+
+    // Hand-built layered graph that exposes the greedy explanation's redundancy.
+    //
+    //   S --a(1)--> A           (layer 0, hypothesis arc; a in domain)
+    //   A --c(2)--> M           (layer 1, c removed  -> out of domain)   <- the bridge
+    //   M --d(3)--> C1          (layer 2, d removed  -> out of domain)
+    //   M --e(4)--> C2          (layer 2, e removed  -> out of domain)
+    //   C1 --f(5)--> T          (layer 3, f in domain)
+    //   C2 --f(5)--> T          (layer 3, f in domain)
+    //
+    // Under the hypothesis var_0 = a, every accepting path crosses the single bridge A->M, so
+    // the minimum explanation is {(1, c)} (size 1). The greedy frontier instead reaches M and
+    // cuts both fan-out arcs into the in-domain cone {C1, C2, T}, giving {(2, d), (2, e)}
+    // (size 2).
+    fn counter_example_graph() -> LayeredGraph {
+        let s = Node { layer: 0, state: 0 };
+        let a = Node { layer: 1, state: 0 };
+        let m = Node { layer: 2, state: 0 };
+        let c1 = Node { layer: 3, state: 0 };
+        let c2 = Node { layer: 3, state: 1 };
+        let t = Node { layer: 4, state: 0 };
+
+        let arc_sa = Arc {
+            start_layer: 0,
+            start_state: 0,
+            end_state: 0,
+            letter: 1,
+        };
+        let arc_am = Arc {
+            start_layer: 1,
+            start_state: 0,
+            end_state: 0,
+            letter: 2,
+        };
+        let arc_mc1 = Arc {
+            start_layer: 2,
+            start_state: 0,
+            end_state: 0,
+            letter: 3,
+        };
+        let arc_mc2 = Arc {
+            start_layer: 2,
+            start_state: 0,
+            end_state: 1,
+            letter: 4,
+        };
+        let arc_c1t = Arc {
+            start_layer: 3,
+            start_state: 0,
+            end_state: 0,
+            letter: 5,
+        };
+        let arc_c2t = Arc {
+            start_layer: 3,
+            start_state: 1,
+            end_state: 0,
+            letter: 5,
+        };
+
+        let layers = vec![
+            HashSet::from([s]),
+            HashSet::from([a]),
+            HashSet::from([m]),
+            HashSet::from([c1, c2]),
+            HashSet::from([t]),
+        ];
+
+        let outbound = HashMap::from([
+            (s, HashSet::from([arc_sa])),
+            (a, HashSet::from([arc_am])),
+            (m, HashSet::from([arc_mc1, arc_mc2])),
+            (c1, HashSet::from([arc_c1t])),
+            (c2, HashSet::from([arc_c2t])),
+        ]);
+        let inbound = HashMap::from([
+            (a, HashSet::from([arc_sa])),
+            (m, HashSet::from([arc_am])),
+            (c1, HashSet::from([arc_mc1])),
+            (c2, HashSet::from([arc_mc2])),
+            (t, HashSet::from([arc_c1t, arc_c2t])),
+        ]);
+
+        let arc_life = HashMap::from([
+            (arc_sa, true),
+            (arc_am, true),
+            (arc_mc1, true),
+            (arc_mc2, true),
+            (arc_c1t, true),
+            (arc_c2t, true),
+        ]);
+        let node_life = HashMap::from([
+            (s, true),
+            (a, true),
+            (m, true),
+            (c1, true),
+            (c2, true),
+            (t, true),
+        ]);
+
+        // c (layer 1) and d, e (layer 2) are removed; a (layer 0) and f (layer 3) remain.
+        let domain = HashMap::from([
+            (0usize, HashSet::from([1])),
+            (1usize, HashSet::new()),
+            (2usize, HashSet::new()),
+            (3usize, HashSet::from([5])),
+        ]);
+
+        LayeredGraph {
+            alphabet: vec![1, 2, 3, 4, 5],
+            layers,
+            arcs: Arcs { outbound, inbound },
+            arc_life,
+            node_life,
+            accepting: vec![0],
+            starting: 0,
+            domain,
+            state_count: 2,
+        }
+    }
+
+    // Test 1 + 2: on a DFA-built instance the minimum explanation is sound (its cut
+    // disconnects the start node from accepting under the hypothesis) and never larger than
+    // the greedy explanation.
+    #[test]
+    fn dfa_instance_minimum_is_sound_and_no_larger_than_greedy() {
+        let mut graph = ends_in_two_graph(2);
+        // Remove the only accepting value from the last variable, which forces the removal of
+        // var_0 = 1 (no accepting path can be completed).
+        graph.kill_value(1, 2);
+
+        let i = 0;
+        let v = 1;
+        let last_layer = graph.layers.len() - 1;
+
+        let greedy_len = graph.explain_removal(i, v).into_iter().count();
+        let minimum = graph.explain_removal_minimum(i, v);
+
+        assert!(
+            minimum.len() <= greedy_len,
+            "minimum ({}) must be at least as small as greedy ({greedy_len})",
+            minimum.len(),
+        );
+
+        let cut: HashSet<(usize, i32)> = minimum.into_iter().collect();
+        assert!(
+            graph.find_escaping_path(i, v, last_layer, &cut).is_none(),
+            "minimum cut must disconnect start from accepting under the hypothesis",
+        );
+    }
+
+    // Test 3 (the motivating case): the greedy explanation is strictly larger than the
+    // minimum-cardinality one.
+    #[test]
+    fn counter_example_minimum_strictly_smaller_than_greedy() {
+        let graph = counter_example_graph();
+        let i = 0;
+        let v = 1;
+        let last_layer = graph.layers.len() - 1;
+
+        let greedy: HashSet<(usize, i32)> = graph.explain_removal(i, v).into_iter().collect();
+        let minimum = graph.explain_removal_minimum(i, v);
+
+        assert_eq!(greedy.len(), 2, "greedy explanation should be size 2");
+        assert_eq!(minimum.len(), 1, "minimum explanation should be size 1");
+        assert!(
+            minimum.len() < greedy.len(),
+            "the whole point: minimum must be strictly smaller than greedy here",
+        );
+        // The single bridge label: arc A->M is (layer 1, letter 2).
+        assert_eq!(minimum, vec![(1usize, 2i32)]);
+
+        // Soundness: cutting just the bridge disconnects start from accepting.
+        let cut: HashSet<(usize, i32)> = minimum.into_iter().collect();
+        assert!(
+            graph.find_escaping_path(i, v, last_layer, &cut).is_none(),
+            "minimum cut must disconnect start from accepting under the hypothesis",
+        );
     }
 }
