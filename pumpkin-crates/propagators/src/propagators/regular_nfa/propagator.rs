@@ -238,7 +238,7 @@ impl<Var: IntegerVariable + 'static> RegularNfaPropagator<Var> {
 }
 
 #[derive(Clone, Debug)]
-pub struct RegularNfaChecker<Var> {
+pub(super) struct RegularNfaChecker<Var> {
     sequence: Box<[Var]>,
     nfa: NFA<Letter>,
 }

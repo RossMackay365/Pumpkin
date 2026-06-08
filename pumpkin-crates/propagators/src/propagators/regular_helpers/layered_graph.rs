@@ -16,7 +16,7 @@ use crate::propagators::regular_helpers::NFA;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code, reason = "not implemented yet")]
-pub struct LayeredGraph {
+pub(crate) struct LayeredGraph {
     alphabet: Vec<Letter>,
     layers: Vec<Layer>,
     arcs: Arcs,
@@ -390,7 +390,7 @@ impl LayeredGraph {
         let _ = self.node_life.remove(&node);
     }
 
-    pub fn living_values(&self, variable_index: usize) -> Vec<Letter> {
+    pub(crate) fn living_values(&self, variable_index: usize) -> Vec<Letter> {
         debug_assert!(variable_index + 1 < self.layers.len());
         let mut values = HashSet::new();
         for node in &self.layers[variable_index] {
@@ -406,7 +406,7 @@ impl LayeredGraph {
         values.into_iter().collect()
     }
 
-    pub fn kill_value(&mut self, variable_index: usize, value: Letter) {
+    pub(crate) fn kill_value(&mut self, variable_index: usize, value: Letter) {
         let _ = self
             .domain
             .get_mut(&variable_index)
@@ -518,7 +518,7 @@ impl LayeredGraph {
             .expect("letter must be in alphabet")
     }
 
-    pub fn explain_removal(
+    pub(crate) fn explain_removal(
         &self,
         variable_index: usize,
         letter: Letter,
@@ -618,11 +618,11 @@ impl LayeredGraph {
         reaches_accepting
     }
 
-    pub fn is_consistent(&self) -> bool {
+    pub(crate) fn is_consistent(&self) -> bool {
         !self.living_values(0).is_empty()
     }
 
-    pub fn count_nodes(&self) -> usize {
+    pub(crate) fn count_nodes(&self) -> usize {
         let mut total = 0;
 
         for layer in &self.layers {

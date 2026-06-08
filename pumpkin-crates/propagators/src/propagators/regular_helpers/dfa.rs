@@ -3,12 +3,11 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::hash::Hash;
 
-use itertools::Itertools;
 
 use super::layered_graph::Letter;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DFA<Item>
+pub(crate) struct DFA<Item>
 where
     Item: Hash + Eq,
 {
@@ -20,7 +19,7 @@ where
 }
 
 impl DFA<Letter> {
-    pub fn from(
+    pub(crate) fn from(
         num_states: u32,
         num_inputs: u32,
         transition_matrix: Vec<Vec<i32>>,

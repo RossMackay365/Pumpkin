@@ -6,7 +6,7 @@ use std::hash::Hash;
 use super::layered_graph::Letter;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NFA<Item>
+pub(crate) struct NFA<Item>
 where
     Item: Hash + Eq,
 {
@@ -18,7 +18,7 @@ where
 }
 
 impl NFA<Letter> {
-    pub fn from(
+    pub(crate) fn from(
         num_states: u32,
         num_inputs: u32,
         transition_matrix: Vec<Vec<Vec<i32>>>,
