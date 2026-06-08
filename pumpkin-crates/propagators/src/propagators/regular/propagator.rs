@@ -24,7 +24,9 @@ use pumpkin_core::state::propagator_conflict;
 use pumpkin_core::statistics::Statistic;
 use pumpkin_core::variables::IntegerVariable;
 
-use crate::propagators::regular_helpers::{DFA, LayeredGraph, Letter};
+use crate::propagators::regular_helpers::DFA;
+use crate::propagators::regular_helpers::LayeredGraph;
+use crate::propagators::regular_helpers::Letter;
 
 create_statistics_struct!(RegularStatistics {
     /// Total time (in nanoseconds) spent syncing the layered multigraph to the current domains
@@ -69,32 +71,42 @@ impl<Var: IntegerVariable + 'static> PropagatorConstructor for RegularPropagator
     }
 
     fn create(self, mut context: PropagatorConstructorContext) -> Self::PropagatorImpl {
-      let RegularPropagatorConstructor {
-          sequence,
-          num_states,
-          num_inputs,
-          transition_matrix,
-          initial_state,
-          accepting_states,
-          constraint_tag,
-      } = self;
+        let RegularPropagatorConstructor {
+            sequence,
+            num_states,
+            num_inputs,
+            transition_matrix,
+            initial_state,
+            accepting_states,
+            constraint_tag,
+        } = self;
 
-      // Register Variables with Solver
-      for (idx, var) in sequence.iter().enumerate() {
-          context.register(var.clone(), DomainEvents::ANY_INT, LocalId::from(idx as u32));
-      }
+        // Register Variables with Solver
+        for (idx, var) in sequence.iter().enumerate() {
+            context.register(
+                var.clone(),
+                DomainEvents::ANY_INT,
+                LocalId::from(idx as u32),
+            );
+        }
 
-      // Build DFA and Internal Graph
-      let dfa = DFA::from(num_states, num_inputs, transition_matrix, initial_state, accepting_states);
-      let internal_graph = LayeredGraph::from((dfa, sequence.len()));
+        // Build DFA and Internal Graph
+        let dfa = DFA::from(
+            num_states,
+            num_inputs,
+            transition_matrix,
+            initial_state,
+            accepting_states,
+        );
+        let internal_graph = LayeredGraph::from((dfa, sequence.len()));
 
-      // Return Constructed Regular Propagator
-      RegularPropagator {
-          sequence,
-          internal_graph,
-          inference_code: InferenceCode::new(constraint_tag, RegularDfa),
-          statistics: RegularStatistics::default(),
-      }
+        // Return Constructed Regular Propagator
+        RegularPropagator {
+            sequence,
+            internal_graph,
+            inference_code: InferenceCode::new(constraint_tag, RegularDfa),
+            statistics: RegularStatistics::default(),
+        }
     }
 }
 
@@ -112,9 +124,9 @@ impl<Var: IntegerVariable + 'static> Propagator for RegularPropagator<Var> {
     }
 
     // Propagation Three Step Approach:
-      // Step 1: Update Graph to Represent Current Domain Values (Kill_Externally_Removed)
-      // Step 2: Check for Conflicts (i.e. No Accepting Paths Exist)
-      // Step 3: Core Propagation -> Remove Values with no Future Accepting Paths
+    // Step 1: Update Graph to Represent Current Domain Values (Kill_Externally_Removed)
+    // Step 2: Check for Conflicts (i.e. No Accepting Paths Exist)
+    // Step 3: Core Propagation -> Remove Values with no Future Accepting Paths
     fn propagate_from_scratch(&self, mut context: PropagationContext) -> PropagationStatusCP {
         let mut graph = self.internal_graph.clone();
 
@@ -148,7 +160,6 @@ impl<Var: IntegerVariable + 'static> Propagator for RegularPropagator<Var> {
 }
 
 impl<Var: IntegerVariable + 'static> RegularPropagator<Var> {
-
     // Updates Layered Graph to Represent Current Domain Values
     fn kill_externally_removed(
         &self,
@@ -173,7 +184,8 @@ impl<Var: IntegerVariable + 'static> RegularPropagator<Var> {
         removed
     }
 
-    // Check if Current Domain Values have Accepting Path -> Otherwise, Construct Conflict Explanation
+    // Check if Current Domain Values have Accepting Path -> Otherwise, Construct Conflict
+    // Explanation
     fn detect_conflict(
         &self,
         graph: &LayeredGraph,
@@ -203,7 +215,8 @@ impl<Var: IntegerVariable + 'static> RegularPropagator<Var> {
             let alive_in_graph: HashSet<i32> = graph.living_values(idx).into_iter().collect();
             let in_domain: Vec<i32> = context.iterate_domain(var).collect();
 
-            // If No Future Accepting Path Exists with Value, Remove from Domain with Generated Explanation
+            // If No Future Accepting Path Exists with Value, Remove from Domain with Generated
+            // Explanation
             for value in in_domain {
                 if alive_in_graph.contains(&value) {
                     continue;
@@ -215,10 +228,7 @@ impl<Var: IntegerVariable + 'static> RegularPropagator<Var> {
                     .map(|(j, letter)| predicate![self.sequence[j] != letter])
                     .collect();
 
-                context.post(
-                    predicate![var != value],
-                    (reason, &self.inference_code),
-                )?;
+                context.post(predicate![var != value], (reason, &self.inference_code))?;
             }
         }
 
@@ -289,11 +299,16 @@ mod tests {
     //   - transition(_, 1) = 1, transition(_, 2) = 2.
     fn ends_in_two_dfa() -> DFA<Letter> {
         DFA::from(
-            /* num_states */ 2,
-            /* num_inputs */ 2,
-            /* transition_matrix */ vec![vec![1, 2], vec![1, 2]],
-            /* initial_state */ 1,
-            /* accepting_states */ vec![2],
+            // num_states
+            2,
+            // num_inputs
+            2,
+            // transition_matrix
+            vec![vec![1, 2], vec![1, 2]],
+            // initial_state
+            1,
+            // accepting_states
+            vec![2],
         )
     }
 
@@ -414,8 +429,8 @@ mod tests {
 
     #[test]
     fn conflict_detected_on_valid_premise_consequent() {
-        // Force First Letter to 1 -> Consequent is Second Letter is 2 -> Premise & (Not) Consequent = Conflict
-        // Premises: x0 = 1. Consequent: x1 = 2.
+        // Force First Letter to 1 -> Consequent is Second Letter is 2 -> Premise & (Not) Consequent
+        // = Conflict Premises: x0 = 1. Consequent: x1 = 2.
         let premises = [TestAtomic {
             name: "x0",
             comparison: pumpkin_checking::Comparison::Equal,

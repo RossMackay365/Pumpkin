@@ -1,10 +1,9 @@
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::hash::Hash;
 
 use itertools::Itertools;
-
-use std::collections::HashMap;
-use std::collections::HashSet;
 
 use super::layered_graph::Letter;
 
@@ -41,7 +40,10 @@ impl DFA<Letter> {
                         if next_state == 0 {
                             return None;
                         }
-                        Some(((state_idx + 1, (input_idx + 1) as Letter), next_state as usize))
+                        Some((
+                            (state_idx + 1, (input_idx + 1) as Letter),
+                            next_state as usize,
+                        ))
                     })
             })
             .collect();
