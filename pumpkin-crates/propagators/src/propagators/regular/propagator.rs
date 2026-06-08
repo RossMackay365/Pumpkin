@@ -1,9 +1,11 @@
 use std::collections::HashSet;
+use std::time::Instant;
 
 use pumpkin_checking::AtomicConstraint;
 use pumpkin_checking::CheckerVariable;
 use pumpkin_checking::InferenceChecker;
 use pumpkin_checking::VariableState;
+use pumpkin_core::create_statistics_struct;
 use pumpkin_core::declare_inference_label;
 use pumpkin_core::predicate;
 use pumpkin_core::predicates::PropositionalConjunction;
@@ -19,9 +21,16 @@ use pumpkin_core::propagation::PropagatorConstructorContext;
 use pumpkin_core::propagation::ReadDomains;
 use pumpkin_core::state::PropagationStatusCP;
 use pumpkin_core::state::propagator_conflict;
+use pumpkin_core::statistics::Statistic;
 use pumpkin_core::variables::IntegerVariable;
 
 use crate::propagators::regular_helpers::{DFA, LayeredGraph, Letter};
+
+create_statistics_struct!(RegularStatistics {
+    /// Total time (in nanoseconds) spent syncing the layered multigraph to the current domains
+    /// (i.e. in `kill_externally_removed`) across the whole run.
+    layered_multigraph_sync_time_ns: u64,
+});
 
 #[derive(Clone, Debug)]
 pub struct RegularPropagatorConstructor<Var> {
@@ -84,6 +93,7 @@ impl<Var: IntegerVariable + 'static> PropagatorConstructor for RegularPropagator
           sequence,
           internal_graph,
           inference_code: InferenceCode::new(constraint_tag, RegularDfa),
+          statistics: RegularStatistics::default(),
       }
     }
 }
@@ -93,6 +103,7 @@ pub struct RegularPropagator<Var> {
     sequence: Box<[Var]>,
     internal_graph: LayeredGraph,
     inference_code: InferenceCode,
+    statistics: RegularStatistics,
 }
 
 impl<Var: IntegerVariable + 'static> Propagator for RegularPropagator<Var> {
@@ -114,6 +125,25 @@ impl<Var: IntegerVariable + 'static> Propagator for RegularPropagator<Var> {
         }
 
         self.propagate_into_domains(&mut context, &graph)
+    }
+
+    // Direct copy of `propagate_from_scratch`, but with timing statistics for 'kill_externally_removed'.
+    fn propagate(&mut self, mut context: PropagationContext) -> PropagationStatusCP {
+        let mut graph = self.internal_graph.clone();
+
+        let start = Instant::now();
+        let removed = self.kill_externally_removed(&context, &mut graph);
+        self.statistics.layered_multigraph_sync_time_ns += start.elapsed().as_nanos() as u64;
+
+        if let Some(conflict) = self.detect_conflict(&graph, removed) {
+            return conflict;
+        }
+
+        self.propagate_into_domains(&mut context, &graph)
+    }
+
+    fn log_statistics(&self, statistic_logger: pumpkin_core::statistics::StatisticLogger) {
+        self.statistics.log(statistic_logger);
     }
 }
 
