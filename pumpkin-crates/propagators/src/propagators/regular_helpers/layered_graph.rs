@@ -712,12 +712,13 @@ impl LayeredGraph {
         }
     }
 
-    // Searches for an accepting path through the layered graph, respecting the hypothesis
-    // 'var_i = letter' at layer `variable_index`.
+    // Searches the layered graph for an accepting path that avoids the labels in `fixed` and
+    // respects the hypothesis 'var_i = letter' at layer `variable_index`, returning the path
+    // with the fewest cuttable labels (found by 0-1 BFS) to keep the branching factor small.
     //
-    // If no path exists, then the current 'fixed' cut is a feasible explanation, and disconnects
-    // the start from accepting under the hypothesis. Otherwise, the returned path is cuttable,
-    // and the locations where it's cuttable are returned, and branched upon.
+    // If no such path exists, the current 'fixed' cut already disconnects the start from
+    // accepting under the hypothesis and is a feasible explanation. Otherwise, the path's
+    // cuttable labels are returned, and branched upon.
     fn find_escaping_path(
         &self,
         variable_index: usize,
@@ -727,23 +728,27 @@ impl LayeredGraph {
     ) -> Option<Vec<Assignment>> {
         let start = self.starting_node();
 
-        // BFS over the full arc set. `came_from` records the arc first used to reach each node,
-        // so the path can be reconstructed once an accepting node is found.
-        let mut visited: HashSet<Node> = HashSet::default();
+        let mut dist: HashMap<Node, usize> = HashMap::default();
+        let mut done: HashSet<Node> = HashSet::default();
         let mut came_from: HashMap<Node, Arc> = HashMap::default();
-        let mut queue: VecDeque<Node> = VecDeque::new();
+        let mut deque: VecDeque<Node> = VecDeque::new();
 
-        let _ = visited.insert(start);
-        queue.push_back(start);
+        let _ = dist.insert(start, 0);
+        deque.push_front(start);
 
         let mut target: Option<Node> = None;
-        while let Some(node) = queue.pop_front() {
-            // Reached an accepting node in the last layer -> escaping path found.
+        while let Some(node) = deque.pop_front() {
+            // Skip stale deque entries: each node is finalised once, at its minimum cost.
+            if !done.insert(node) {
+                continue;
+            }
+            // The first accepting node finalised is reached with the fewest candidates.
             if node.layer == last_layer && self.accepting.contains(&node.state) {
                 target = Some(node);
                 break;
             }
 
+            let node_dist = dist[&node];
             for arc in self.outbound_edges_all(node) {
                 // Skip Previously Cut Arcs
                 if fixed.contains(&(arc.start_layer, arc.letter)) {
@@ -754,11 +759,21 @@ impl LayeredGraph {
                     continue;
                 }
 
-                // First time we reach `end`: remember the arc and queue it.
+                // An arc costs 1 if it is a cuttable candidate, 0 otherwise.
+                let cuttable = arc.start_layer != variable_index && !self.is_in_domain(*arc);
+                let weight = usize::from(cuttable);
+
                 let end = arc.end();
-                if visited.insert(end) {
+                let new_dist = node_dist + weight;
+                if new_dist < *dist.get(&end).unwrap_or(&usize::MAX) {
+                    let _ = dist.insert(end, new_dist);
                     let _ = came_from.insert(end, *arc);
-                    queue.push_back(end);
+                    // Weight-0 arcs keep the same cost (front); weight-1 arcs increase it (back).
+                    if weight == 0 {
+                        deque.push_front(end);
+                    } else {
+                        deque.push_back(end);
+                    }
                 }
             }
         }
