@@ -7,6 +7,7 @@ use itertools::Itertools;
 use pumpkin_checking::AtomicConstraint;
 use pumpkin_checking::CheckerVariable;
 use pumpkin_checking::InferenceChecker;
+use pumpkin_checking::IntExt;
 use pumpkin_checking::VariableState;
 use pumpkin_core::conjunction;
 use pumpkin_core::containers::HashMap;
@@ -439,38 +440,103 @@ where
     CVar: CheckerVariable<Atomic>,
     Atomic: AtomicConstraint,
 {
-    fn check(&self, state: VariableState<Atomic>, _: &[Atomic], _: Option<&Atomic>) -> bool {
+    fn check(&self, mut state: VariableState<Atomic>, _: &[Atomic], _: Option<&Atomic>) -> bool {
         let n = self.sequence.len();
 
-        // let lb = match self.count.induced_lower_bound(&state) {
-        //     IntExt::Int(v) => Some(v),
-        //     _ => None,
-        // };
-        // let ub = match self.count.induced_upper_bound(&state) {
-        //     IntExt::Int(v) => Some(v),
-        //     _ => None,
-        // };
+        // Get domains of the variables in the sequence.
+        let mut sequence_domains = vec![];
+        for var in &self.sequence {
+            let symbols = (1..(self.c_dfa.num_inputs + 1))
+                .filter_map(|l| {
+                    if var.induced_domain_contains(&state, l as i32) {
+                        Some(l as usize - 1)
+                    } else {
+                        None
+                    }
+                })
+                .collect_vec();
+            sequence_domains.push(symbols);
+        }
 
         // Get all possible counts after consuming the sequence.
         let qcf_table = &mut Vec::with_capacity(n + 1);
-        compute_qcf_for_check(&self.sequence, &self.c_dfa, &state, qcf_table, n);
+        let qcb_table = &mut Vec::with_capacity(n + 1);
+        compute_qcb_and_qcf_for_check(&sequence_domains, &self.c_dfa, qcf_table, qcb_table, 0);
 
         // Check that all values in the domain of count are still possible.
-        let mut possible = false;
+        let mut consistent = true;
 
-        let possible_counts = qcf_table
-            .get(n)
-            .unwrap()
-            .iter()
-            .map(|(_, counts)| counts.clone())
-            .collect_vec()
-            .concat();
+        let lb = self.count.induced_lower_bound(&state);
+        let ub = self.count.induced_upper_bound(&state);
 
-        for &c in possible_counts.iter() {
-            possible |= self.count.induced_domain_contains(&state, c as i32);
+        // For each variable in sequence, determine which symbols it can and can't be.
+        for (i, symbols) in sequence_domains.iter().enumerate() {
+            let var = self.sequence.get(i).unwrap();
+
+            // Get the states that can be the ith state,
+            // with the minimum and maximum costs to get
+            // from the start to them and from them to the end.
+            let qcf = qcf_table.get(i).unwrap();
+            let qcb = qcb_table.get(n - i - 1).unwrap();
+
+            // For each symbol in their domain.
+            'symbols: for &l in symbols {
+                // Compute the minimum value of c when the ith var in the sequence is l.
+                for (prev_q, min_c_before, max_c_before) in qcf
+                    .iter()
+                    .map(|&(q, (min_c, max_c))| (q.to_usize(), min_c, max_c))
+                {
+                    let ref_q = self.c_dfa.transition_matrix[prev_q][l];
+
+                    for (min_c_after, max_c_after) in
+                        qcb.iter().filter_map(|&(q, (min_c, max_c))| {
+                            if q == ref_q {
+                                Some((min_c, max_c))
+                            } else {
+                                None
+                            }
+                        })
+                    {
+                        let min_c = IntExt::Int(
+                            (min_c_before + self.c_dfa.inc[prev_q][l] + min_c_after) as i32,
+                        );
+                        let max_c = IntExt::Int(
+                            (max_c_before + self.c_dfa.inc[prev_q][l] + max_c_after) as i32,
+                        );
+
+                        // NOT (ub < min_c || max_c < lb)
+                        // lb <= max_c && min_c <= ub
+                        if lb.max(max_c) == max_c && ub.min(min_c) == min_c {
+                            // Var i can equal l
+                            let atomic = var.atomic_equal((l + 1) as i32);
+                            consistent &= state.apply(&atomic);
+
+                            // go to the next symbol.
+                            continue 'symbols;
+                        }
+                    }
+                }
+                // No configuration where var i can equal l was found, so var i is not equal to l.
+                let atomic = var.atomic_not_equal((l + 1) as i32);
+                consistent &= state.apply(&atomic);
+            }
         }
 
-        !possible
+        // Check the upper and lower bound of count.
+        let mut min_min_c = u32::MAX;
+        let mut max_max_c = u32::MIN;
+        for &(_, (min_c, max_c)) in qcf_table.get(n).unwrap().iter() {
+            min_min_c = u32::min(min_min_c, min_c);
+            max_max_c = u32::max(max_max_c, max_c);
+        }
+
+        // min_min_c <= count <= max_max_c
+        let atomic_lb = self.count.atomic_greater_than(min_min_c as i32);
+        let atomic_ub = self.count.atomic_less_than(max_max_c as i32);
+        consistent &= state.apply(&atomic_lb);
+        consistent &= state.apply(&atomic_ub);
+
+        !consistent
     }
 }
 
@@ -515,15 +581,13 @@ fn insert_max<K: Hash + Eq, V: PartialOrd>(hm: &mut HashMap<K, V>, k: K, v: V) {
     };
 }
 
-fn compute_qcf_for_check<Var: CheckerVariable<Atomic>, Atomic: AtomicConstraint>(
-    sequence: &[Var],
+fn compute_qcf_for_check(
+    sequence_domains: &Vec<Vec<usize>>,
     c_dfa: &Cdfa,
-    state: &VariableState<Atomic>,
-    qcf_table: &mut Vec<Vec<(u32, Vec<u32>)>>,
-
+    qcf_table: &mut Vec<Vec<(u32, (u32, u32))>>,
     i: usize,
 ) {
-    let n = sequence.len();
+    let n = sequence_domains.len();
     let index = if i > n { n } else { i };
 
     if index < qcf_table.len() {
@@ -531,46 +595,110 @@ fn compute_qcf_for_check<Var: CheckerVariable<Atomic>, Atomic: AtomicConstraint>
     }
 
     if i == 0 {
-        qcf_table.insert(0, vec![(c_dfa.initial_state, vec![0])]);
+        qcf_table.insert(0, vec![(c_dfa.initial_state, (0, 0))]);
         return;
     }
 
-    compute_qcf_for_check(sequence, c_dfa, state, qcf_table, index - 1);
+    compute_qcf_for_check(sequence_domains, c_dfa, qcf_table, index - 1);
     let pairs = qcf_table.get(index - 1).unwrap();
 
-    let var = sequence.get(index - 1).unwrap();
+    let symbols = sequence_domains.get(index - 1).unwrap();
 
-    let mut new_pairs: HashMap<u32, Vec<Vec<u32>>> = HashMap::default();
+    let mut new_min_pairs: HashMap<u32, u32> = HashMap::default();
+    let mut new_max_pairs: HashMap<u32, u32> = HashMap::default();
 
-    for (q, counts) in pairs.iter().map(|(q, counts)| (*q as usize, counts)) {
-        let symbols = (1..(c_dfa.num_inputs + 1))
-            .filter_map(|l| {
-                if var.induced_domain_contains(state, l as i32) {
-                    Some(l as usize - 1)
-                } else {
-                    None
-                }
-            })
-            .collect_vec();
-
+    for (q, (min_count, max_count)) in pairs.iter().map(|&(q, counts)| (q as usize, counts)) {
         for &l in symbols.iter() {
             let new_q = c_dfa.transition_matrix[q][l];
-            let new_counts = counts.iter().map(|&c| c + c_dfa.inc[q][l]).collect_vec();
+            let new_min_count = min_count + c_dfa.inc[q][l];
+            let new_max_count = max_count + c_dfa.inc[q][l];
 
-            let _ = new_pairs
-                .entry(new_q)
-                .and_modify(|vec| vec.push(new_counts.clone()))
-                .or_insert(vec![new_counts.clone()]);
+            insert_min(&mut new_min_pairs, new_q, new_min_count);
+            insert_max(&mut new_max_pairs, new_q, new_max_count);
         }
     }
 
-    let new_vec = new_pairs
-        .iter()
-        .map(|(q, counts)| (*q, counts.concat()))
-        .sorted_by(|(q1, _), (q2, _)| q1.cmp(q2))
-        .collect_vec();
+    let mut new_vec = vec![];
+    for q in 1..(c_dfa.num_states + 1) {
+        if new_min_pairs.contains_key(&q) && new_max_pairs.contains_key(&q) {
+            new_vec.push((
+                q,
+                (
+                    *new_min_pairs.get(&q).unwrap(),
+                    *new_max_pairs.get(&q).unwrap(),
+                ),
+            ));
+        }
+    }
 
     qcf_table.insert(index, new_vec);
+}
+
+fn compute_qcb_and_qcf_for_check(
+    sequence_domains: &Vec<Vec<usize>>,
+    c_dfa: &Cdfa,
+    qcf_table: &mut Vec<Vec<(u32, (u32, u32))>>,
+    qcb_table: &mut Vec<Vec<(u32, (u32, u32))>>,
+
+    i: usize,
+) {
+    let n = sequence_domains.len();
+    let index = if i > n { n } else { i };
+
+    if index < qcb_table.len() {
+        return;
+    }
+
+    if index == n {
+        compute_qcf_for_check(sequence_domains, c_dfa, qcf_table, n);
+        qcb_table.insert(
+            0,
+            qcf_table
+                .get(n)
+                .unwrap()
+                .iter()
+                .map(|&(q, _)| (q, (0, 0)))
+                .collect_vec(),
+        );
+        return;
+    }
+
+    compute_qcb_and_qcf_for_check(sequence_domains, c_dfa, qcf_table, qcb_table, index + 1);
+    let pairs = qcb_table.get(n - index - 1).unwrap();
+
+    let mut new_min_pairs: HashMap<u32, u32> = HashMap::default();
+    let mut new_max_pairs: HashMap<u32, u32> = HashMap::default();
+
+    let symbols = sequence_domains.get(index).unwrap();
+
+    for &(q, (min_c, max_c)) in pairs.iter() {
+        for &l in symbols.iter() {
+            for prev_q in 0..c_dfa.num_states {
+                if c_dfa.transition_matrix[prev_q as usize][l] == q {
+                    let new_min_c = min_c + c_dfa.inc[prev_q as usize][l];
+                    let new_max_c = max_c + c_dfa.inc[prev_q as usize][l];
+
+                    insert_min(&mut new_min_pairs, prev_q, new_min_c);
+                    insert_max(&mut new_max_pairs, prev_q, new_max_c);
+                }
+            }
+        }
+    }
+
+    let mut new_vec = vec![];
+    for q in 1..(c_dfa.num_states + 1) {
+        if new_min_pairs.contains_key(&q) && new_max_pairs.contains_key(&q) {
+            new_vec.push((
+                q,
+                (
+                    *new_min_pairs.get(&q).unwrap(),
+                    *new_max_pairs.get(&q).unwrap(),
+                ),
+            ));
+        }
+    }
+
+    qcb_table.insert(n - index, new_vec);
 }
 
 fn compute_qcf<Var: IntegerVariable + 'static>(
